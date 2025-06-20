@@ -98,6 +98,18 @@ def _(file_import, io, mo, pd):
 
     contents = io.BytesIO(file_import.value[0].contents)
     df = pd.read_csv(contents)
+    mo.stop(
+        sorted(list(df.columns)) != sorted(['Well', 'Sample ID', 'Range', 'ng/uL', '% Total', 'nmole/L','Avg. Size', '%CV', 'Size Threshold (b.p.)', 'DQN']),
+        output= mo.md("""
+        /// warning| Unrecognized input file
+
+        The input file for this worksheet is expected to have a specific format. It is expected to have these columns, regardless of order:
+    
+        |Well | Sample ID | Range | ng/uL | % Total | nmole/L | Avg. Size | %CV | Size Threshold (b.p.) | DQN |
+        |:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+        ///
+        """)
+    )
     return (df,)
 
 
@@ -112,7 +124,7 @@ def _(df, mo):
 @app.cell(hide_code=True)
 def _(df, mo, rownumber):
     interval = df['Range'][rownumber.value - 1]
-    mo.hstack([rownumber, mo.md(f"{interval}")], justify = 'start')
+    mo.hstack([rownumber, mo.md(f"Range: {interval}")], justify = 'start')
     return (interval,)
 
 
@@ -148,7 +160,7 @@ def _(mo, quants):
     err = {}
     for i,j in quants.value.items():
         try:
-            int(j)
+            float(j)
         except ValueError:
             err[i] = j
 
@@ -168,7 +180,7 @@ def _(mo, quants):
 def _(err, mo, pd, quants):
     mo.stop(err)
     quants_df = pd.DataFrame(
-        {"Sample ID": list(quants.value.keys()), "concentration (ng/uL)": [int(i) for i in quants.value.values()]}
+        {"Sample ID": list(quants.value.keys()), "concentration (ng/uL)": [float(i) for i in quants.value.values()]}
     )
     return (quants_df,)
 
