@@ -19,6 +19,7 @@ def _(mo):
 def _():
     import io
     import os
+    import pyarrow
     from pathlib import Path
     import marimo as mo
     import pandas as pd
@@ -43,61 +44,12 @@ def _(example_table, mo):
     mo.md(
         f"""
     ## Import Data
-    Use the file importer below to load the data from the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which row (within sample rows) has the fragment size interval you are interested in performing a scaled concentration correction on. In the example table below, if you were interested in 450bp to 800bp, that would be row 3 of `sample_1`. This value is expected to be consistent across all samples, meaning interval 450-800 would also be the 3rd row for `sample_2`, etc.
+    Use the file importer below to load the data from the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which row (within sample rows) has the fragment size interval you are interested in performing a scaled concentration correction on. In the example table below, if you were interested in the `Range` 450bp to 800bp, that would be row 3 of `sample_1`. This value is expected to be consistent across all samples, meaning interval 450-800 would also be the 3rd row for `sample_2`, etc.
 
     {mo.accordion({"Example CSV File": example_table})}
     """
     )
     return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    file_import = mo.ui.file(
-        kind="area",
-        filetypes = [".csv", ".CSV"],
-        label = "Drag and drop the fragment analysis CSV file here, or click to open file browser"
-    )
-    rownumber = mo.ui.number(start=1, stop=10, label="Row number of target interval within each sample")
-    mo.vstack([file_import, rownumber], heights= [.25, .75], align='center', justify='center')
-    return file_import, rownumber
-
-
-@app.cell(hide_code=True)
-def _(file_import, io, mo, pd, rownumber):
-    wait_text = """
-    /// admonition| Input file required.
-
-    Cannot proceed without a CSV being uploaded
-    ///
-    """
-    mo.stop(not file_import.value, mo.md(wait_text))
-
-    contents = io.BytesIO(file_import.value[0].contents)
-    df = pd.read_csv(contents)
-    interval = df['Range'][rownumber.value - 1]
-    df
-    return df, interval
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(
-        """
-    ## Sample Concentrations
-    Using the table below, please include the concentrations, in ng/uL (nanograms per microliter), for each sample.
-    """
-    )
-    return
-
-
-@app.cell(hide_code=True)
-def _(df, mo):
-    samples = df[['Well', 'Sample ID']].drop_duplicates().reset_index(drop=True)
-    samples['concentration (ng/uL)'] = [0.0] * len(samples)
-    editor = mo.ui.data_editor(samples)
-    editor
-    return (editor,)
 
 
 @app.cell(hide_code=True)
@@ -124,21 +76,121 @@ def _(pd):
 
 
 @app.cell(hide_code=True)
-def _(interval, mo):
-    mo.md(
-        f"""
-    ## Results
-
-    Below is the table of the adjusted concentrations for the fragment interval you are interested in ({interval}). If this is the wrong interval, please change the row number at the top of this page. The numbers below are rounded to 3 decimal places.
-    """
+def _(mo):
+    file_import = mo.ui.file(
+        kind="area",
+        filetypes = [".csv", ".CSV"],
+        label = "Drag and drop the fragment analysis CSV file here, or click to open file browser"
     )
+    file_import
+    return (file_import,)
+
+
+@app.cell(hide_code=True)
+def _(file_import, io, mo, pd):
+    wait_text = """
+    /// admonition| Input file required.
+
+    Cannot proceed without a CSV being uploaded
+    ///
+    """
+    mo.stop(not file_import.value, mo.md(wait_text))
+
+    contents = io.BytesIO(file_import.value[0].contents)
+    df = pd.read_csv(contents)
+    return (df,)
+
+
+@app.cell(hide_code=True)
+def _(df, mo):
+    sample_id = list(set(df['Sample ID']))
+    intervals = list(set(df['Range']))
+    rownumber = mo.ui.number(start=1, stop=len(intervals), label="Row number of target Range within each sample")
+    return (rownumber,)
+
+
+@app.cell(hide_code=True)
+def _(df, mo, rownumber):
+    interval = df['Range'][rownumber.value - 1]
+    mo.hstack([rownumber, mo.md(f"{interval}")], justify = 'start')
+    return (interval,)
+
+
+@app.cell
+def _(df):
+    df
     return
 
 
 @app.cell(hide_code=True)
-def _(df, editor, process_sample, rownumber):
-    df_with_conc = df.merge(editor.value, on=['Well','Sample ID'], how="left")
-    df_with_conc.groupby('Well').apply(lambda group: process_sample(group, rownumber), include_groups=False)
+def _(mo):
+    input_header = mo.md(
+        """
+    ## Sample Concentrations
+    Using this interactive form, include the concentrations for each sample in **ng/uL** (nanograms per microliter).
+    """
+    )
+    return (input_header,)
+
+
+@app.cell(hide_code=True)
+def _(df, input_header, mo):
+    samples_id = set(df['Sample ID'])
+    quants = mo.ui.dictionary(
+        dict(zip(samples_id, (mo.ui.text(value = "0", full_width=True,debounce=True) for i in samples_id)))
+    )
+    mo.vstack([input_header,quants])
+    return (quants,)
+
+
+@app.cell(hide_code=True)
+def _(mo, quants):
+    err = {}
+    for i,j in quants.value.items():
+        try:
+            int(j)
+        except ValueError:
+            err[i] = j
+
+    mo.stop(err,
+        mo.md(f"""
+    /// error| Concentrations must be numeric
+
+    These samples were provided incorrect concentrations:
+
+    {"\n".join(f"{i}: **{j}**" for i,j in err.items())}
+    ///""")
+    )
+    return (err,)
+
+
+@app.cell(hide_code=True)
+def _(err, mo, pd, quants):
+    mo.stop(err)
+    quants_df = pd.DataFrame(
+        {"Sample ID": list(quants.value.keys()), "concentration (ng/uL)": [int(i) for i in quants.value.values()]}
+    )
+    return (quants_df,)
+
+
+@app.cell(hide_code=True)
+def _(df, err, interval, mo, process_sample, quants_df, rownumber):
+    mo.stop(err)
+    results_header = mo.md(f"""
+    ## Scaled Concentrations
+
+    This table scales the concentrations you input above with the proportion of the sample with the target Range ({interval})
+    """)
+
+    df_with_conc = df.merge(
+        quants_df,
+        on='Sample ID',
+        how="left"
+    )
+    mo.vstack([
+        results_header,
+        df_with_conc.groupby('Well').apply(lambda group: process_sample(group, rownumber), include_groups=False)
+    ])
     return
 
 
