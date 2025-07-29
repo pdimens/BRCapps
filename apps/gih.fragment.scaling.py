@@ -70,7 +70,7 @@ def _(pd):
             'Corrected Smear': round(corrected_smear,3),
             'Sample ng/uL': quant,
             'Corrected ng/uL': round(quant * corrected_smear,3),
-            'Est nM': round(quant * corrected_smear,3) / (660 * target_size) * 1000000
+            'Est nM': round(round(quant * corrected_smear,3) / (660 * target_size) * 1000000, 2)
         }
     )
 
