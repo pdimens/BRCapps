@@ -69,8 +69,10 @@ def _(pd):
             'Window ng/uL': round(target_conc,3),
             'Corrected Smear': round(corrected_smear,3),
             'Sample ng/uL': quant,
-            'Corrected ng/uL': round(quant * corrected_smear,3)
-        })
+            'Corrected ng/uL': round(quant * corrected_smear,3),
+            'Est nM': round(quant * corrected_smear,3) / (660 * target_size) * 1000000
+        }
+    )
 
     return (process_sample,)
 
