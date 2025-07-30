@@ -1,13 +1,13 @@
 import marimo
 
-__generated_with = "0.14.0"
+__generated_with = "0.14.13"
 app = marimo.App(width="medium")
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(mo):
     mo.md(
-        """
+        r"""
     # BRC Fragment Analysis Scaled Concentrations
     This worksheet will scale the concentration of your DNA samples based on the proportion of representation of your target fragment interval as determined by fragment analysis. In other words, given the fragment analysis results, your target interval, and the original concentrations of your samples (or pools), this worksheet will calculate the "effective" concentration of the DNA you want to sequence.
     """
@@ -15,12 +15,12 @@ def _(mo):
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _():
     import io
-    import os
-    import pyarrow
-    from pathlib import Path
+    #import os
+    #import pyarrow
+    #from pathlib import Path
     import marimo as mo
     import pandas as pd
 
@@ -39,7 +39,7 @@ def _():
     return example_table, io, mo, pd
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(example_table, mo):
     mo.md(
         f"""
@@ -52,32 +52,39 @@ def _(example_table, mo):
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(pd):
-    def process_sample(group, _rownum):
+    def process_sample(group, _rownum, picomoles):
         target_row = group.iloc[_rownum.value -1]
-        corrected_sum = group['ng/uL'].iloc[1:].sum()
-        target_conc = target_row['ng/uL']
+        corrected_sum = group['ng/µL'].iloc[1:].sum()
+        target_conc = target_row['ng/µL']
         target_size = target_row['Avg. Size']
         sample_id = target_row['Sample ID']
         corrected_smear = target_conc/corrected_sum
-        quant = target_row['concentration (ng/uL)']
+        quant = target_row['concentration (ng/µL)']
+        nM = (quant * corrected_smear) / (target_size * 660) * 1000000
+        if nM > 0:
+            vol_to_pool = picomoles / nM
+        else:
+            vol_to_pool = 0
+        ng_primary_lib = quant * vol_to_pool
         return pd.Series(
             {
             'Sample ID': sample_id,
             'Avg.Size': target_size,
-            'Window ng/uL': round(target_conc,3),
-            'Corrected Smear': round(corrected_smear,3),
-            'Sample ng/uL': quant,
-            'Corrected ng/uL': round(quant * corrected_smear,3),
-            'Est nM': round(round(quant * corrected_smear,3) / (660 * target_size) * 1000000, 2)
-        }
-    )
+            '% of Total Conc.': round(corrected_smear * 100,1),
+            'Window ng/µL': round(target_conc,3),
+            'Sample ng/µL': quant,
+            'Est. nM': round(nM, 2),
+            'Corrected ng/µL': round(quant * corrected_smear,3),
+            'Volume to Pool': round(vol_to_pool, 2),
+            'ng Primary Library': round(ng_primary_lib, 1)
+        })
 
     return (process_sample,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(mo):
     file_import = mo.ui.file(
         kind="area",
@@ -88,7 +95,7 @@ def _(mo):
     return (file_import,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(file_import, io, mo, pd):
     wait_text = """
     /// admonition| Input file required.
@@ -100,14 +107,16 @@ def _(file_import, io, mo, pd):
 
     contents = io.BytesIO(file_import.value[0].contents)
     df = pd.read_csv(contents)
+    df.rename(columns = {'ng/uL' : 'ng/µL'}, inplace = True)
+
     mo.stop(
-        sorted(list(df.columns)) != sorted(['Well', 'Sample ID', 'Range', 'ng/uL', '% Total', 'nmole/L','Avg. Size', '%CV', 'Size Threshold (b.p.)', 'DQN']),
+        sorted(list(df.columns)) != sorted(['Well', 'Sample ID', 'Range', 'ng/µL', '% Total', 'nmole/L','Avg. Size', '%CV', 'Size Threshold (b.p.)', 'DQN']),
         output= mo.md("""
         /// warning| Unrecognized input file
 
         The input file for this worksheet is expected to have a specific format. It is expected to have these columns, regardless of order:
-    
-        |Well | Sample ID | Range | ng/uL | % Total | nmole/L | Avg. Size | %CV | Size Threshold (b.p.) | DQN |
+
+        |Well | Sample ID | Range | ng/µL | % Total | nmole/L | Avg. Size | %CV | Size Threshold (b.p.) | DQN |
         |:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|
         ///
         """)
@@ -115,19 +124,11 @@ def _(file_import, io, mo, pd):
     return (df,)
 
 
-@app.cell(hide_code=True)
-def _(df, mo):
+@app.cell
+def _(df):
     sample_id = list(set(df['Sample ID']))
     intervals = list(set(df['Range']))
-    rownumber = mo.ui.number(start=1, stop=len(intervals), label="Row number of target Range within each sample")
-    return (rownumber,)
-
-
-@app.cell(hide_code=True)
-def _(df, mo, rownumber):
-    interval = df['Range'][rownumber.value - 1]
-    mo.hstack([rownumber, mo.md(f"Range: {interval}")], justify = 'start')
-    return (interval,)
+    return (intervals,)
 
 
 @app.cell
@@ -136,75 +137,119 @@ def _(df):
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(mo):
-    input_header = mo.md(
-        """
-    ## Sample Concentrations
-    Using this interactive form, include the concentrations for each sample in **ng/uL** (nanograms per microliter).
-    """
-    )
+    input_header = mo.md("## Sample Concentrations\n\nUsing this interactive form, include the concentrations for each sample in **ng/µL** (nanograms per microliter).")
     return (input_header,)
 
 
-@app.cell(hide_code=True)
-def _(df, input_header, mo):
-    samples_id = set(df['Sample ID'])
-    quants = mo.ui.dictionary(
-        dict(zip(samples_id, (mo.ui.text(value = "0", full_width=True,debounce=True) for i in samples_id)))
+@app.cell
+def _(df, input_header, mo, pd):
+    def unique(sequence):
+        seen = set()
+        return [x for x in sequence if not (x in seen or seen.add(x))]
+    samples_id = unique(df['Sample ID'])
+
+    quants_df = mo.ui.data_editor(
+        pd.DataFrame({
+            'Sample ID' : list(samples_id),
+            'concentration (ng/µL)': [0.0 for i in range(len(samples_id))]
+        }),
+        label = "Add sample concentrations here"
     )
-    mo.vstack([input_header,quants])
-    return (quants,)
 
-
-@app.cell(hide_code=True)
-def _(mo, quants):
-    err = {}
-    for i,j in quants.value.items():
-        try:
-            float(j)
-        except ValueError:
-            err[i] = j
-
-    mo.stop(err,
-        mo.md(f"""
-    /// error| Concentrations must be numeric
-
-    These samples were provided incorrect concentrations:
-
-    {"\n".join(f"{i}: **{j}**" for i,j in err.items())}
-    ///""")
-    )
-    return (err,)
-
-
-@app.cell(hide_code=True)
-def _(err, mo, pd, quants):
-    mo.stop(err)
-    quants_df = pd.DataFrame(
-        {"Sample ID": list(quants.value.keys()), "concentration (ng/uL)": [float(i) for i in quants.value.values()]}
-    )
+    mo.vstack([input_header,quants_df])
     return (quants_df,)
 
 
-@app.cell(hide_code=True)
-def _(df, err, interval, mo, process_sample, quants_df, rownumber):
-    mo.stop(err)
-    results_header = mo.md(f"""
-    ## Scaled Concentrations
+@app.cell
+def _(intervals, mo):
+    rownumber = mo.ui.number(start=1, stop=len(intervals), label="Row number of target Range within each sample")
+    target_pmol = mo.ui.slider(
+        value = 15.0,
+        start = 0.1,
+        stop = 50.0,
+        step = 0.1,
+        include_input = True,
+        label = "Target **picomoles** for final Libraries"
+    )
+    return rownumber, target_pmol
 
-    This table scales the concentrations you input above with the proportion of the sample with the target Range ({interval})
-    """)
 
+@app.cell
+def _(df, mo, rownumber, target_pmol):
+    interval = df['Range'][rownumber.value - 1]
+
+    mo.vstack([
+        mo.hstack([rownumber, mo.md(f"Range: {interval}")], justify = 'start'),
+        target_pmol
+    ])
+    return (interval,)
+
+
+@app.cell
+def _(df, interval, mo, process_sample, quants_df, rownumber, target_pmol):
     df_with_conc = df.merge(
-        quants_df,
-        on='Sample ID',
+        quants_df.value,
+        left_on='Sample ID',
+        right_on='Sample ID',
         how="left"
     )
-    mo.vstack([
-        results_header,
-        df_with_conc.groupby('Well').apply(lambda group: process_sample(group, rownumber), include_groups=False)
-    ])
+
+    calc_table = df_with_conc.groupby('Well').apply(lambda group: process_sample(group, rownumber,target_pmol.value), include_groups=False)
+    mo.ui.table(
+        calc_table,
+        pagination = False,
+        selection = None,
+        show_column_summaries = False,
+        show_data_types = False,
+        freeze_columns_left = ["Sample ID"],
+        label = f"## Scaled Concentrations\n\nThis table scales the concentrations you input above with the proportion of the sample with the target Range ({interval})"
+    )
+    return (calc_table,)
+
+
+@app.cell
+def _(file_import, mo):
+    mo.stop(not file_import.value)
+    elution_vol = mo.ui.slider(
+        value = 20,
+        start = 1,
+        stop = 100,
+        step = 1,
+        include_input = True,
+        label = "Volume to elute in (µL)"
+    )
+    elution_vol
+    return (elution_vol,)
+
+
+@app.cell
+def _(calc_table, elution_vol, mo, target_pmol):
+    total_vol = calc_table['Volume to Pool'].sum()
+    total_ng = calc_table['ng Primary Library'].sum()
+    total_pM = target_pmol.value * len(calc_table.index)
+
+    pool_ngul = 0 if total_vol == 0 else round(total_ng / total_vol,1)
+    pool_uM = 0 if total_vol == 0 else total_pM / total_vol
+    recovery = round(pool_uM * total_vol / elution_vol.value, 2)
+
+    mo.md(f"""
+    ## Final Pooling Metrics
+
+    Total Volume of Pool (µL): **{round(total_vol,2)}**
+
+    Total ng Across Pools: **{total_ng}**
+
+    Pool ng/µL : **{pool_ngul}**
+
+    Total pM across intervals: **{total_pM}**
+
+    µM Per Pool across intervals : **{round(pool_uM,1)}**
+
+    µM Per Pool assuming 100% recovery: **{recovery}**
+    """)
+
     return
 
 
