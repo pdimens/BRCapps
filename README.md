@@ -1,16 +1,7 @@
-# marimo WebAssembly + GitHub Pages Template
+# BRC Convenience Webapps
+This repository contains marimo-made interactive web apps to process BRC-specific data. The sections below detail how to add new
+apps.
 
-This template repository demonstrates how to export [marimo](https://marimo.io) notebooks to WebAssembly and deploy them to GitHub Pages.
-
-## 🚀 Usage
-
-1. Fork this repository
-2. Add your marimo files to the `notebooks/` or `apps/` directory
-   1. `notebooks/` notebooks are exported with `--mode edit`
-   2. `apps/` notebooks are exported with `--mode run`
-3. Push to main branch
-4. Go to repository **Settings > Pages** and change the "Source" dropdown to "GitHub Actions"
-5. GitHub Actions will automatically build and deploy to Pages
 
 ## Including data or assets
 
