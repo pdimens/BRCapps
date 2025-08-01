@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.14.13"
+__generated_with = "0.14.15"
 app = marimo.App(width="medium")
 
 
@@ -121,6 +121,10 @@ def _(file_import, io, mo, pd):
         ///
         """)
     )
+    mo.md("""/// admonition | First row skipped
+
+    Be aware that the first row of each sample, usually 10bp-100bp is skipped in the calculations below.
+    ///""")
     return (df,)
 
 
