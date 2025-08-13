@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.14.15"
+__generated_with = "0.14.17"
 app = marimo.App(width="medium")
 
 
@@ -18,9 +18,7 @@ def _(mo):
 @app.cell
 def _():
     import io
-    #import os
-    #import pyarrow
-    #from pathlib import Path
+    #from natsort import natsort_keygen
     import marimo as mo
     import pandas as pd
 
@@ -44,7 +42,7 @@ def _(example_table, mo):
     mo.md(
         f"""
     ## Import Data
-    Use the file importer below to load the data from the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which row (within sample rows) has the fragment size interval you are interested in performing a scaled concentration correction on. In the example table below, if you were interested in the `Range` 450bp to 800bp, that would be row 3 of `sample_1`. This value is expected to be consistent across all samples, meaning interval 450-800 would also be the 3rd row for `sample_2`, etc.
+    Use the file importer below to load the data from the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which row (within sample rows) has the fragment size interval you are interested in performing a scaled concentration correction on. In the example table below, if you were interested in the `Range` 450bp to 800bp, that would be row 3 of `sample_1`. **This value is expected to be consistent across all samples, meaning interval 450-800 would also be the 3rd row for `sample_2`, etc.**
 
     {mo.accordion({"Example CSV File": example_table})}
     """
@@ -108,11 +106,12 @@ def _(file_import, io, mo, pd):
     contents = io.BytesIO(file_import.value[0].contents)
     df = pd.read_csv(contents)
     df.rename(columns = {'ng/uL' : 'ng/µL'}, inplace = True)
+    df = df[~df['Sample ID'].isin(["ladder", "Ladder","LADDER"])]
 
     mo.stop(
         sorted(list(df.columns)) != sorted(['Well', 'Sample ID', 'Range', 'ng/µL', '% Total', 'nmole/L','Avg. Size', '%CV', 'Size Threshold (b.p.)', 'DQN']),
         output= mo.md("""
-        /// warning| Unrecognized input file
+        /// error| Unrecognized input file
 
         The input file for this worksheet is expected to have a specific format. It is expected to have these columns, regardless of order:
 
@@ -123,7 +122,7 @@ def _(file_import, io, mo, pd):
     )
     mo.md("""/// admonition | First row skipped
 
-    Be aware that the first row of each sample, usually 10bp-100bp is skipped in the calculations below.
+    Be aware that the first row of each sample, usually 10bp-100bp, is skipped in the calculations below. Rows with `Ladder` as the `Sample ID` are removed as well.
     ///""")
     return (df,)
 
@@ -159,7 +158,9 @@ def _(df, input_header, mo, pd):
             'Sample ID' : list(samples_id),
             'concentration (ng/µL)': [0.0 for i in range(len(samples_id))]
         }),
-        label = "Add sample concentrations here"
+        editable_columns= ['concentration (ng/µL)'],
+        label = "Add sample concentrations here",
+        pagination= False
     )
 
     mo.vstack([input_header,quants_df])
@@ -168,7 +169,7 @@ def _(df, input_header, mo, pd):
 
 @app.cell
 def _(intervals, mo):
-    rownumber = mo.ui.number(start=1, stop=len(intervals), label="Row number of target Range within each sample")
+    rownumber = mo.ui.number(start=2, stop=len(intervals), label="Row number of target Range within each sample")
     target_pmol = mo.ui.slider(
         value = 15.0,
         start = 0.1,
@@ -192,7 +193,19 @@ def _(df, mo, rownumber, target_pmol):
 
 
 @app.cell
-def _(df, interval, mo, process_sample, quants_df, rownumber, target_pmol):
+def _(df, interval, mo, pd, process_sample, quants_df, rownumber, target_pmol):
+    n_rows = pd.DataFrame(df.groupby('Sample ID').size(),columns=['sample'])
+
+    too_few_rows = f"""
+    /// error| Not enough rows.
+
+    You have selected row {rownumber.value}, however, there are samples with fewer rows than that, therefore
+    we cannot proceed.
+    ///
+    """
+    mo.stop(any(i < rownumber.value for i in n_rows['sample']), mo.md(too_few_rows))
+
+
     df_with_conc = df.merge(
         quants_df.value,
         left_on='Sample ID',
@@ -200,7 +213,7 @@ def _(df, interval, mo, process_sample, quants_df, rownumber, target_pmol):
         how="left"
     )
 
-    calc_table = df_with_conc.groupby('Well').apply(lambda group: process_sample(group, rownumber,target_pmol.value), include_groups=False)
+    calc_table = df_with_conc.groupby('Well', sort = False).apply(lambda group: process_sample(group, rownumber,target_pmol.value), include_groups=False)
     mo.ui.table(
         calc_table,
         pagination = False,
@@ -208,14 +221,14 @@ def _(df, interval, mo, process_sample, quants_df, rownumber, target_pmol):
         show_column_summaries = False,
         show_data_types = False,
         freeze_columns_left = ["Sample ID"],
-        label = f"## Scaled Concentrations\n\nThis table scales the concentrations you input above with the proportion of the sample with the target Range ({interval})"
+        label = f"## Scaled Concentrations\n\nThis table scales the concentrations you input above with the proportion of the sample with the target `Range` **{interval}**"
     )
-    return (calc_table,)
+    return calc_table, n_rows
 
 
 @app.cell
-def _(file_import, mo):
-    mo.stop(not file_import.value)
+def _(file_import, mo, n_rows, rownumber):
+    mo.stop(not file_import.value or any(i < rownumber.value for i in n_rows['sample']))
     elution_vol = mo.ui.slider(
         value = 20,
         start = 1,
