@@ -1,17 +1,15 @@
 import marimo
 
-__generated_with = "0.14.17"
+__generated_with = "0.17.7"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # BRC Fragment Analysis Scaled Concentrations
     This worksheet will scale the concentration of your DNA samples based on the proportion of representation of your target fragment interval as determined by fragment analysis. In other words, given the fragment analysis results, your target interval, and the original concentrations of your samples (or pools), this worksheet will calculate the "effective" concentration of the DNA you want to sequence.
-    """
-    )
+    """)
     return
 
 
@@ -39,14 +37,12 @@ def _():
 
 @app.cell
 def _(example_table, mo):
-    mo.md(
-        f"""
+    mo.md(f"""
     ## Import Data
     Use the file importer below to load the data from the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which row (within sample rows) has the fragment size interval you are interested in performing a scaled concentration correction on. In the example table below, if you were interested in the `Range` 450bp to 800bp, that would be row 3 of `sample_1`. **This value is expected to be consistent across all samples, meaning interval 450-800 would also be the 3rd row for `sample_2`, etc.**
 
     {mo.accordion({"Example CSV File": example_table})}
-    """
-    )
+    """)
     return
 
 
@@ -78,7 +74,6 @@ def _(pd):
             'Volume to Pool': round(vol_to_pool, 2),
             'ng Primary Library': round(ng_primary_lib, 1)
         })
-
     return (process_sample,)
 
 
@@ -141,13 +136,9 @@ def _(df):
 
 
 @app.cell
-def _(mo):
+def _(df, mo, pd):
     input_header = mo.md("## Sample Concentrations\n\nUsing this interactive form, include the concentrations for each sample in **ng/µL** (nanograms per microliter).")
-    return (input_header,)
 
-
-@app.cell
-def _(df, input_header, mo, pd):
     def unique(sequence):
         seen = set()
         return [x for x in sequence if not (x in seen or seen.add(x))]
@@ -266,7 +257,6 @@ def _(calc_table, elution_vol, mo, target_pmol):
 
     µM Per Pool assuming 100% recovery: **{recovery}**
     """)
-
     return
 
 
