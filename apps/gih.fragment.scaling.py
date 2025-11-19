@@ -8,6 +8,9 @@ app = marimo.App(width="medium", app_title="Fragment Analysis Library Pooling")
 def _(mo):
     mo.md(r"""
     # BRC Fragment Analysis Scaled Concentrations
+    
+    <img src="public/gih_logo.png" width="200" />
+    
     This worksheet will scale the concentration of your DNA samples based on the proportion of representation of your target fragment interval as determined by fragment analysis. In other words, given the fragment analysis results, your target interval, and the original concentrations of your samples (or pools), this worksheet will calculate the "effective" concentration of the DNA you want to sequence.
     """)
     return
