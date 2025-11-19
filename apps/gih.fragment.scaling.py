@@ -1,7 +1,7 @@
 import marimo
 
-__generated_with = "0.17.7"
-app = marimo.App(width="medium")
+__generated_with = "0.17.8"
+app = marimo.App(width="medium", app_title="Fragment Analysis Library Pooling")
 
 
 @app.cell
@@ -16,7 +16,6 @@ def _(mo):
 @app.cell
 def _():
     import io
-    #from natsort import natsort_keygen
     import marimo as mo
     import pandas as pd
 
@@ -81,7 +80,7 @@ def _(pd):
 def _(mo):
     file_import = mo.ui.file(
         kind="area",
-        filetypes = [".csv", ".CSV"],
+        filetypes = [".csv", ".CSV", ".Csv"],
         label = "Drag and drop the fragment analysis CSV file here, or click to open file browser"
     )
     file_import
@@ -130,14 +129,23 @@ def _(df):
 
 
 @app.cell
-def _(df):
-    df
+def _(df, file_import, mo):
+    mo.ui.table(
+        df,
+        label = f"##Smear Analysis\nFile: **{file_import.value[0].name}**",
+        show_column_summaries=False,
+        freeze_columns_left=["Sample ID"],
+        show_data_types = False,
+        selection = None,
+        pagination = False,
+        max_height=400
+    )
     return
 
 
 @app.cell
 def _(df, mo, pd):
-    input_header = mo.md("## Sample Concentrations\n\nUsing this interactive form, include the concentrations for each sample in **ng/µL** (nanograms per microliter).")
+    input_header = mo.md("##Sample Concentrations\nUsing this interactive form, include the concentrations for each sample in **ng/µL** (nanograms per microliter).")
 
     def unique(sequence):
         seen = set()
@@ -154,7 +162,7 @@ def _(df, mo, pd):
         pagination= False
     )
 
-    mo.vstack([input_header,quants_df])
+    mo.vstack([input_header,quants_df], gap = 0)
     return (quants_df,)
 
 
@@ -233,7 +241,7 @@ def _(file_import, mo, n_rows, rownumber):
 
 
 @app.cell
-def _(calc_table, elution_vol, mo, target_pmol):
+def _(calc_table, elution_vol, mo, pd, target_pmol):
     total_vol = calc_table['Volume to Pool'].sum()
     total_ng = calc_table['ng Primary Library'].sum()
     total_pM = target_pmol.value * len(calc_table.index)
@@ -242,21 +250,27 @@ def _(calc_table, elution_vol, mo, target_pmol):
     pool_uM = 0 if total_vol == 0 else total_pM / total_vol
     recovery = round(pool_uM * total_vol / elution_vol.value, 2)
 
-    mo.md(f"""
-    ## Final Pooling Metrics
+    def style_cell(_rowId, _columnName, value):
+        if _columnName == "Value":
+            return {"fontWeight": "bold"}
+        return {}
 
-    Total Volume of Pool (µL): **{round(total_vol,2)}**
-
-    Total ng Across Pools: **{total_ng}**
-
-    Pool ng/µL : **{pool_ngul}**
-
-    Total pM across intervals: **{total_pM}**
-
-    µM Per Pool across intervals : **{round(pool_uM,1)}**
-
-    µM Per Pool assuming 100% recovery: **{recovery}**
-    """)
+    mo.hstack(
+        [mo.ui.table(
+            pd.DataFrame({
+                "Metric" : ["Total Volume of Pool (µL)", "Total ng Across Pools", "Pool ng/µL", "Total pM across intervals", "µM Per Pool across intervals", "µM Per Pool assuming 100% recovery"],
+                "Value" : [round(total_vol,2), total_ng, round(pool_ngul,2) , total_pM, round(pool_uM,1), recovery]
+            }),
+            label = "##Final Pooling Metrics",
+            show_data_types = False,
+            style_cell = style_cell,
+            pagination = False,
+            selection = None
+        ),
+        ""],
+        widths= [0, 1]
+    
+    )
     return
 
 
