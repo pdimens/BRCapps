@@ -52,11 +52,11 @@ def _(file_import, mo):
 def _(example_table, mo):
     mo.md(f"""
     ## Import Data
-    Use the file importer in the left sidebar to load the data from the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which row (within sample rows) has the fragment size interval you are interested in performing a scaled concentration correction on. In the example table below, if you were interested in the `Range` 450bp to 800bp, that would be row 3 of `sample_1`.
+    Use the file importer in the left sidebar to load the data from the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which fragment size interval you are interested in performing a scaled concentration correction on.
 
     {mo.accordion({
         "🔍︎ Example CSV File": example_table,
-        "⚠️ Notes and Considerations" : mo.md("**First row skipped**: Be aware that the first interval (sorted alphanumerically) of each sample, usually 10bp-100bp, is skipped in the calculations below.\n\n**Singletons skipped**: Rows with a `Sample ID` that only appears once (e.g. a ladder, samples from a different run) are removed.\n\n**Consistency**: The row number for the target range value is expected to be consistent across all samples, meaning interval 450-800 would also be the 3rd row for `sample_2`, etc.")
+        "⚠️ Notes and Considerations" : mo.md("**First row skipped**: Be aware that the first interval (sorted alphanumerically) of each sample, usually 10bp-100bp, is skipped in the calculations below.\n\n**Singletons skipped**: Rows with a `Sample ID` that only appears once are removed (e.g. a ladder, samples from a different run).\n\n**Consistency**: The target range is expected to be consistent across all samples.")
     })}
     """)
     return
