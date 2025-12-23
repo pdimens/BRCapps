@@ -110,7 +110,7 @@ def _(df, mo):
 def _(batched, mo, switches):
     mo.vstack(
         [
-        mo.md(f"## Summary Table\nThe table below summarizes across unique `gene_id` values and reports the `start`/`end` positions that corrspond to the information in the `gene` rows (of the `feature` column). It includes columns consolidating unique values for the attribute names selected by switching the toggles you see below. Once you select the attributes you want, press the \"**Generate output table**\" button below to create the table (this is done to avoid recomputing the table each time an attribute is selected)"),
+        mo.md(f"## Summary Table\nThe table below summarizes across unique `gene_id` values and reports the `start`/`end` positions that corrspond to the information in the `gene` rows (of the `feature` column). It includes columns consolidating unique values for the attribute names selected by switching the toggles you see below. Once you select the attributes you want, press the \"**Generate output table**\" button below to create the table (this is done to avoid recomputing the table each time an attribute is selected)."),
         mo.hstack([mo.vstack(z, gap = 0.05) for z in batched(switches, len(switches) // 3 + 1)])
         ]
     )
