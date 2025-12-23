@@ -34,8 +34,9 @@ def _():
 def _(mo):
     file_import = mo.ui.file(
         kind="area",
-        filetypes = [".gtf", ".GTF", ".gtf.gz", ".GTF.gz", ".GTF.GZ"],
-        label = "Drag and drop the GTF file here, or click to open file browser"
+        filetypes = [".gtf", ".GTF", ".gtf.gz", ".GTF.gz", ".GTF.GZ", ".gff", ".GFF", ".gff.gz", ".GFF.gz", ".GFF.GZ"],
+        label = "Drag and drop the GTF file here, or click to open file browser. Maximum file size is 2GB; if your file is larger than 2GB, you can try to gz-compress the file to shrink it.",
+        max_size =  2000000000
     )
     file_import
     return (file_import,)
@@ -46,7 +47,7 @@ def _(file_import, gzip, io, mo, pd):
     wait_text = """
     /// admonition| Input file required.
 
-    Cannot proceed until a GTF file is uploaded
+    Cannot proceed until a file is uploaded
     ///
     """
     mo.stop(not file_import.value, mo.md(wait_text))
@@ -62,31 +63,17 @@ def _(file_import, gzip, io, mo, pd):
                     d[keyval[0].strip()] = keyval[1].strip()
         return d
 
-    if file_import.value[0].name.lower().endswith(".gz"):
-        df = pd.read_csv(
-            gzip.open(io.BytesIO(file_import.contents()), "r"),
-            delimiter="\t",
-            header = None,
-            comment = "#",
-            skip_blank_lines=True,
-            names = ["seqname", "source", "feature", "start", "end", "score", "strand", "frame", "attribute"],
-            converters= {
-                "attribute" : process_attributes
-            }
-        )
-
-    else:
-        df = pd.read_csv(
-            io.BytesIO(file_import.contents()),
-            delimiter="\t",
-            header = None,
-            comment = "#",
-            skip_blank_lines=True,
-            names = ["seqname", "source", "feature", "start", "end", "score", "strand", "frame", "attribute"],
-            converters= {
-                "attribute" : process_attributes
-            }
-        )
+    df = pd.read_csv(
+        file_import.name(0),
+        delimiter="\t",
+        header = None,
+        comment = "#",
+        skip_blank_lines=True,
+        names = ["seqname", "source", "feature", "start", "end", "score", "strand", "frame", "attribute"],
+        converters= {
+            "attribute" : process_attributes
+        }
+    )
 
     df.insert(8, 'gene id', [i["gene_id"] for i in df['attribute']])
     for j in df['attribute']:
