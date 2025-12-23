@@ -2,7 +2,6 @@
 # requires-python = ">=3.13"
 # dependencies = [
 #     "pandas==2.3.3",
-#     "pygnome==0.3.0",
 # ]
 # ///
 
