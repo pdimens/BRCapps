@@ -12,22 +12,16 @@ app = marimo.App(width="medium")
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    # GTF File Summarizer
-    """)
-    return
-
-
-@app.cell
 def _():
+    import gzip
     import io
     from itertools import batched
-    import gzip
     import marimo as mo
     import os
     import pandas as pd
-    return batched, gzip, io, mo, pd
+    import re
+    pd.options.mode.copy_on_write = True
+    return batched, gzip, io, mo, pd, re
 
 
 @app.cell
@@ -35,33 +29,44 @@ def _(mo):
     file_import = mo.ui.file(
         kind="area",
         filetypes = [".gtf", ".GTF", ".gtf.gz", ".GTF.gz", ".GTF.GZ", ".gff", ".GFF", ".gff.gz", ".GFF.gz", ".GFF.GZ"],
-        label = "Drag and drop the GTF file here, or click to open file browser. The maximum file size is 2GB. If your file is larger than 2GB, you can try to gz-compress the file to shrink it.",
+        label = "Drag and drop the GTF file here, or click to open file browser.",
         max_size =  2000000000
     )
-    file_import
     return (file_import,)
 
 
 @app.cell
-def _(file_import, gzip, io, mo, pd):
-    wait_text = """
-    /// admonition| Input file required.
+def _(file_import, mo):
+    mo.sidebar([mo.md("# GTF Summarizer\nThe maximum file size is 2GB. If your file is larger than 2GB, you can try to gz-compress the file to shrink it."), file_import], footer = mo.md("Made with ❤️ for 🧬"))
+    return
 
-    Cannot proceed until a file is uploaded
-    ///
-    """
+
+@app.cell
+def _(re):
+    def parse_attributes(text):
+        """Process the attributes column of a GTF file and correctly assign key-value pairs"""
+        result = {}
+        # Find all key followed by one or more quoted values
+        pattern = r'(\w+)\s+((?:"[^"]+"\s*)+)'
+
+        for match in re.finditer(pattern, text):
+            key = match.group(1)
+            values_str = match.group(2)
+
+            # Extract all quoted values for this key
+            values = re.findall(r'"([^"]+)"', values_str)
+
+            # Store as single value or list
+            result[key] = values[0] if len(values) == 1 else ", ".join(values)
+
+        return result
+    return (parse_attributes,)
+
+
+@app.cell
+def _(file_import, gzip, io, mo, parse_attributes, pd):
+    wait_text = """/// admonition| Input file required.\n\nCannot proceed until a file is uploaded\n///"""
     mo.stop(not file_import.value, mo.md(wait_text))
-
-    def process_attributes(x):
-        _semicolon_split = x.strip(";").replace("\"",'').split(";")
-        d = {}
-        for i in _semicolon_split:
-            if i.strip():
-                #print(i.split())
-                keyval = i.strip().split()
-                if len(keyval) > 1:
-                    d[keyval[0].strip()] = keyval[1].strip()
-        return d
 
     if file_import.name().lower().endswith(".gz"):
         infile = gzip.open(io.BytesIO(file_import.contents()), "r")
@@ -76,7 +81,7 @@ def _(file_import, gzip, io, mo, pd):
         skip_blank_lines=True,
         names = ["seqname", "source", "feature", "start", "end", "score", "strand", "frame", "attribute"],
         converters= {
-            "attribute" : process_attributes
+            "attribute" : parse_attributes
         }
     )
 
@@ -85,14 +90,8 @@ def _(file_import, gzip, io, mo, pd):
         del j["gene_id"]
 
     _generows = (df['feature'] == 'gene').sum()
-    mdtext = f"""
-    Input file `{file_import.value[0].name}` has **{_generows} gene feature rows**.
-    Showing the first 5 rows.
-    """
-    df.head()
-    mo.vstack(
-        [mo.md(mdtext), df.head()]
-    )
+    mdtext = f"Input file `{file_import.value[0].name}` has **{_generows} gene feature rows**. Showing the first 5 rows."""
+    mo.ui.table(df.head(), show_data_types=False, label = mdtext)
     return (df,)
 
 
@@ -103,25 +102,25 @@ def _(df, mo):
         [allkey.add(str(a2)) for a2 in a1]
     allkeys = sorted(allkey)
     switches = mo.ui.array([mo.ui.switch(label=b1) for b1 in allkeys])
-    return allkeys, switches
+    button = mo.ui.run_button(label = "Generate output table")
+    return allkeys, button, switches
 
 
 @app.cell
-def _(batched, mo, selected_attributes, switches):
-    keycols = ", ".join(selected_attributes)
+def _(batched, mo, switches):
     mo.vstack(
         [
-        mo.md(f"## Summary Table\nThe table below summarizes across unique `gene_id` values and reports the `start`/`end` positions that corrspond to the information in the `gene` rows (of the `feature` column). It includes columns consolidating unique values for the attribute names selected by switching the toggles you see below."),
-        mo.hstack([mo.vstack(z, gap = 0.05) for z in batched(switches, 10)])
+        mo.md(f"## Summary Table\nThe table below summarizes across unique `gene_id` values and reports the `start`/`end` positions that corrspond to the information in the `gene` rows (of the `feature` column). It includes columns consolidating unique values for the attribute names selected by switching the toggles you see below. Once you select the attributes you want, press the \"**Generate output table**\" button below to create the table (this is done to avoid recomputing the table each time an attribute is selected)"),
+        mo.hstack([mo.vstack(z, gap = 0.05) for z in batched(switches, len(switches) // 3 + 1)])
         ]
     )
     return
 
 
 @app.cell
-def _(allkeys, df, mo, pd, switches):
+def _(allkeys, button, df, mo, pd, switches):
+    mo.stop(not button.value, output = button.center())
     selected_attributes = [i for idx,i in enumerate(allkeys) if switches.value[idx]]
-
     generows = df[df['feature'] == 'gene'].iloc[:, [8,0,3,4,6]]
 
     user_defined_cols = df.groupby('gene id').apply(
@@ -138,9 +137,12 @@ def _(allkeys, df, mo, pd, switches):
 
     mo.ui.table(
         generows.merge(user_defined_cols, on='gene id', how='left'),
-        show_column_summaries=False
+        label = "Summary Table",
+        page_size = 20,
+        show_column_summaries=False,
+        show_data_types=False
     )
-    return (selected_attributes,)
+    return
 
 
 if __name__ == "__main__":
