@@ -37,7 +37,7 @@ def _(mo):
 
 @app.cell
 def _(file_import, mo):
-    mo.sidebar([mo.md("# GTF Summarizer\nThe maximum file size is 2GB. If your file is larger than 2GB, you can try to gz-compress the file to shrink it."), file_import], footer = mo.md("Made with ❤️ for 🧬"))
+    mo.sidebar([mo.md('# GTF Summarizer\nThe maximum file size is 2GB. If your file is larger than 2GB, you can try to gz-compress the file to shrink it.'), file_import], footer = mo.md('<img src="public/gih_logo.png" width="200" />\n\nMade with ❤️ for 🧬'))
     return
 
 
