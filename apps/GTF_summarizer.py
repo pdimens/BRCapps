@@ -8,7 +8,7 @@
 
 import marimo
 
-__generated_with = "0.17.7"
+__generated_with = "0.18.4"
 app = marimo.App(width="medium")
 
 
@@ -23,11 +23,12 @@ def _(mo):
 @app.cell
 def _():
     import io
+    from itertools import batched
     import gzip
     import marimo as mo
     import os
     import pandas as pd
-    return gzip, io, mo, pd
+    return batched, gzip, io, mo, pd
 
 
 @app.cell
@@ -35,7 +36,7 @@ def _(mo):
     file_import = mo.ui.file(
         kind="area",
         filetypes = [".gtf", ".GTF", ".gtf.gz", ".GTF.gz", ".GTF.GZ", ".gff", ".GFF", ".gff.gz", ".GFF.gz", ".GFF.GZ"],
-        label = "Drag and drop the GTF file here, or click to open file browser. Maximum file size is 2GB; if your file is larger than 2GB, you can try to gz-compress the file to shrink it.",
+        label = "Drag and drop the GTF file here, or click to open file browser. The maximum file size is 2GB. If your file is larger than 2GB, you can try to gz-compress the file to shrink it.",
         max_size =  2000000000
     )
     file_import
@@ -63,8 +64,13 @@ def _(file_import, gzip, io, mo, pd):
                     d[keyval[0].strip()] = keyval[1].strip()
         return d
 
+    if file_import.name().lower().endswith(".gz"):
+        infile = gzip.open(io.BytesIO(file_import.contents()), "r")
+    else:
+        infile = io.BytesIO(file_import.contents())
+
     df = pd.read_csv(
-        file_import.name(0),
+        infile,
         delimiter="\t",
         header = None,
         comment = "#",
@@ -93,30 +99,30 @@ def _(file_import, gzip, io, mo, pd):
 
 @app.cell
 def _(df, mo):
-    allkeys = set()
-
-    for i in df['attribute']:
-        [allkeys.add(str(j)) for j in i]
-
-    multiselect = mo.ui.multiselect(
-        options = sorted(allkeys),
-        label = "Choose which attribute keys to retain as columns below. Rows with the same `gene_id` that have repeated attribute keys across their rows will have their unique values concatenated using a semicolon `;`",
-        full_width=True
-    )
-
-    multiselect
-    return (multiselect,)
+    allkey = set()
+    for a1 in df['attribute']:
+        [allkey.add(str(a2)) for a2 in a1]
+    allkeys = sorted(allkey)
+    switches = mo.ui.array([mo.ui.switch(label=b1) for b1 in allkeys])
+    return allkeys, switches
 
 
 @app.cell
-def _(mo, multiselect):
-    keycols = ", ".join(multiselect.value)
-    mo.md(f"# Summary Table\nThis table summarizes across unique `gene_id` values and reports the `start`/`end` positions that corrspond to the information in the `gene` rows (of the `feature` column). It includes columns consolidating unique values for the values in the `attribute` keys:\n**{keycols}**")
+def _(batched, mo, selected_attributes, switches):
+    keycols = ", ".join(selected_attributes)
+    mo.vstack(
+        [
+        mo.md(f"## Summary Table\nThe table below summarizes across unique `gene_id` values and reports the `start`/`end` positions that corrspond to the information in the `gene` rows (of the `feature` column). It includes columns consolidating unique values for the attribute names selected by switching the toggles you see below."),
+        mo.hstack([mo.vstack(z, gap = 0.05) for z in batched(switches, 10)])
+        ]
+    )
     return
 
 
 @app.cell
-def _(df, mo, multiselect, pd):
+def _(allkeys, df, mo, pd, switches):
+    selected_attributes = [i for idx,i in enumerate(allkeys) if switches.value[idx]]
+
     generows = df[df['feature'] == 'gene'].iloc[:, [8,0,3,4,6]]
 
     user_defined_cols = df.groupby('gene id').apply(
@@ -126,7 +132,7 @@ def _(df, mo, multiselect, pd):
                     str(d[key]) for d in x['attribute'] if key in d
                 )
             ))
-            for key in multiselect.value
+            for key in selected_attributes
         }),
         include_groups=False
     ).reset_index()
@@ -135,7 +141,7 @@ def _(df, mo, multiselect, pd):
         generows.merge(user_defined_cols, on='gene id', how='left'),
         show_column_summaries=False
     )
-    return
+    return (selected_attributes,)
 
 
 if __name__ == "__main__":
