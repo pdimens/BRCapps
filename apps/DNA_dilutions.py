@@ -27,9 +27,9 @@ def _(mo):
 
     start_ul = mo.ui.slider(
         value = 1,
-        start = 0.5,
-        stop = 200,
-        step = 0.5,
+        start = 0.1,
+        stop = 195,
+        step = 0.1,
         include_input = True,
         full_width = True,
         label = "Microliters (ul) of input DNA"
@@ -46,15 +46,6 @@ def _(mo):
     )
 
     headers = mo.ui.switch(value= True, label = "has headers")
-
-    example_table = mo.md("""
-    | Well | Sample    | ng/uL  |
-    |:-----|:----------|:-------|
-    | A1   | sample_1  | 0.4294 |
-    | A2   | sample_2  | 0.0312 |
-    | A3   | sample_3  | 2.4305 |
-    | A4   | sample_4  | 0.6945 |
-    """)
 
     example_file = mo.md("""
     |Well,Sample,ng/uL|
