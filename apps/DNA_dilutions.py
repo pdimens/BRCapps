@@ -37,13 +37,15 @@ def _(mo):
 
     target_ng = mo.ui.slider(
         value = 5,
-        start = 0.5,
-        stop = 50,
-        step = 0.5,
+        start = 0.1,
+        stop = 10,
+        step = 0.1,
         include_input = True,
         full_width = True,
         label = "Target concentration (ng/ul) of DNA"
     )
+
+    headers = mo.ui.switch(value= True, label = "has headers")
 
     example_table = mo.md("""
     | Well | Sample    | ng/uL  |
@@ -63,7 +65,7 @@ def _(mo):
     |A4,sample_4,0.6945|
     """
     )
-    return example_file, file_import, start_ul, target_ng
+    return example_file, file_import, headers, start_ul, target_ng
 
 
 @app.cell
@@ -137,16 +139,19 @@ def _(copy, df, pd, start_ul, target_ng):
 
 
 @app.cell
-def _(example_file, file_import, mo, target_ng):
+def _(file_import, headers, mo, start_ul, target_ng):
     mo.sidebar(
         [
             mo.md(
                 '# DNA Dilutions Calculator'
                 '\nThis worksheet takes your DNA concentrations and formats the water volumes for a dilution plate.'
             ),
-            file_import,
-            target_ng,
-            mo.md(f"""/// details | 🔍︎ Example input\n{example_file}\n///""")
+            mo.vstack([
+              file_import,
+              headers,
+              start_ul,
+              target_ng
+            ], align = 'center'),
         ],
         footer = mo.md('<img src="public/gih_logo.png" width="200" />\n\nMade with ❤️ for 🧬')
     )
@@ -157,22 +162,30 @@ def _(example_file, file_import, mo, target_ng):
 def _(mo):
     mo.md(f"""
     ## Import Data
-    Use the file importer in the left sidebar to load the data from a comma or whitespace delimited (CSV/TSV) file. The file needs only 3 case-insensitive columns (`well`, `sample`, `ng/ul`) and all other columns will be ignored and dropped. Wells can be in 1 or 2 digit form (e.g. `A1` and `A01` are both valid).
-
-    ---
+    Use the file importer in the left sidebar to load the data from a comma or whitespace delimited (CSV/TSV) file. At minimum, the file needs a column of well ID's (e.g. `A2`), sample names, and concentration (ng/ul). Wells can be in 1 or 2 digit form (e.g. `A1` and `A01` are both valid).
     """)
     return
 
 
 @app.cell
-def _(file_import, io, mo, pd):
+def _(example_file, file_import, headers, io, mo, pd):
     mo.stop(
         not file_import.value,
-        mo.md("/// admonition| Input file required\n///")
+        mo.md(
+            f"""
+    /// admonition| Input file required
+
+    /// details | 🔍︎ Example input
+    {example_file}
+    ///
+    
+    ///
+            """
+        )
     )
 
     try:
-        df = pd.read_table(io.BytesIO(file_import.value[0].contents), engine='python', sep=None)
+        df = pd.read_table(io.BytesIO(file_import.value[0].contents), header= 0 if headers.value else None, engine='python', sep=None)
         df.columns = [i.lower() for i in df.columns]
     except Exception:
         is_err = True
@@ -186,47 +199,48 @@ def _(file_import, io, mo, pd):
         err = mo.vstack([err_md, mo.md(f"```\n{file_import.value[0].contents[:200]}\n```")])
         mo.stop(is_err, err)
 
-    mo.stop(
-        any([i not in df.columns for i in ['well', 'sample', 'ng/ul']]),
-        mo.vstack([
-            mo.md(f"""
-                /// error| Invalid input file
-        
-                The input file is expected to have a specific format as outlined above (columns `well`, `sample`, and `ng/ul`),
-                but those columns were not found. 
-        
-                ///
-                """),
-            mo.ui.table(df.head(2), show_column_summaries=False, selection=None, show_data_types=False)
-        ])
-    )
+    colnames = mo.ui.array([mo.ui.dropdown(options=list(df.columns), label=f"{i} column") for i in ['well','sample ID', 'concentration']])
 
-
-    return (df,)
+    mo.vstack([
+        mo.md("Please select the columns in your input file to map as well, sample ID, and concentration columns"),
+        mo.ui.table(df.head(3), selection = None, show_column_summaries=False, show_data_types=False, show_download = False),
+        mo.hstack(colnames)
+    ])
+    return colnames, df
 
 
 @app.cell
-def _(df, start_ul, target_ng):
-    df_clean = df[['well', 'sample', 'ng/ul']]
+def _(colnames, df, mo, start_ul, target_ng):
+    mo.stop(
+        any([not i.value for i in colnames]),
+        mo.md(f"""
+            /// admonition| Map input columns to continue
+
+            ///
+            """)
+    )
+
+    df_clean = df[[i.value for i in colnames]]
+    df_clean.columns = ['well', 'sample', 'ng/ul']
     df_clean['ul DNA'] = start_ul.value
     df_clean['diluent (ul)'] = round(((df_clean['ng/ul'] * df_clean['ul DNA']) / target_ng.value) - df_clean['ul DNA'], 2)
     return (df_clean,)
 
 
 @app.cell
-def _(df_clean, file_import, mo, recalc_dilution, start_ul):
-    mo.stop(not file_import.value)
+def _(colnames, df_clean, file_import, mo, recalc_dilution):
+    mo.stop(not file_import.value or (any([not i.value for i in colnames])))
     input_text = mo.md(r"""
     ## Input Volume
-    Use the slider to set a fixed input volume or the table editor to modify the input DNA volume  per sample. The changes will be reflected in the final output tables.
+    Use the slider on the left to set a fixed input volume or the table editor in the dropdown below to modify the input DNA volume  per sample. The changes will be reflected in the final output tables.
     """)
-
 
     editor = mo.ui.data_editor(df_clean, editable_columns=['ul DNA'], on_change=recalc_dilution)
     mo.vstack([
         input_text,
-        mo.ui.tabs({"Fixed volume": start_ul, "Variable volume": editor})
+        mo.accordion({"Variable Volumes" : editor})
     ])
+
     return (editor,)
 
 
@@ -245,10 +259,9 @@ def _(editor, mo, style_cell):
 
 
 @app.cell
-def _(df, file_import, mo):
-    mo.stop(not file_import.value or (any([i not in df.columns for i in ['well', 'sample', 'ng/ul']])))
+def _(colnames, file_import, mo):
+    mo.stop(not file_import.value or (any([not i.value for i in colnames])))
     mo.md(r"""
-    ---
     ## Resulting DNA Dilutions
     Negative values for `diluent (ul)` are highlighted in red and indicate that the sample's original concentration is below your desired diluted concentration. Values for `diluent (ul)` highlighted in orange indicate a final volume greater than **190ul**, which would be the maximum volume a standard 96-well microplate can hold without issues.
     """)
