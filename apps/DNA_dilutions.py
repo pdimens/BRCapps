@@ -9,11 +9,12 @@ def _():
     import copy
     import io
     import marimo as mo
+    from math import modf
     import numpy as np
     import pandas as pd
     import re
     import string
-    return copy, io, mo, pd
+    return copy, io, mo, modf, np, pd
 
 
 @app.cell
@@ -28,11 +29,11 @@ def _(mo):
     start_ul = mo.ui.slider(
         value = 1,
         start = 0.1,
-        stop = 195,
+        stop = 25,
         step = 0.1,
         include_input = True,
         full_width = True,
-        label = "Microliters (ul) of input DNA"
+        label = "Input volume (ul) of stock DNA"
     )
 
     target_ng = mo.ui.slider(
@@ -45,7 +46,18 @@ def _(mo):
         label = "Target concentration (ng/ul) of DNA"
     )
 
-    headers = mo.ui.switch(value= True, label = "has headers")
+    target_ul = mo.ui.slider(
+        value = 5,
+        start = 1,
+        stop = 20,
+        step = 0.1,
+        include_input = True,
+        full_width = True,
+        label = "Min. required ul of diluted DNA"
+    )
+
+
+    headers = mo.ui.switch(value= True, label = "file has column headers")
 
     example_file = mo.md("""
     |Well,Sample,ng/uL|
@@ -56,11 +68,11 @@ def _(mo):
     |A4,sample_4,0.6945|
     """
     )
-    return example_file, file_import, headers, start_ul, target_ng
+    return example_file, file_import, headers, start_ul, target_ng, target_ul
 
 
 @app.cell
-def _(copy, df, pd, start_ul, target_ng):
+def _(copy, df, modf, pd, start_ul, target_ng, target_ul):
     # define functions
     def print_upto(x, n) -> list[str]:
         '''Given a stringio bytes object `x`, split out lines and return up to `n` lines'''
@@ -84,6 +96,12 @@ def _(copy, df, pd, start_ul, target_ng):
                 }
             elif  value > (190 - start_ul.value):
                 return {
+                    "backgroundColor": "black",
+                    "color": "white",
+                    "fontWeight": "bold"
+                }
+            elif (value + start_ul.value) < target_ul.value:
+                return {
                     "backgroundColor": "orange",
                     "color": "brown",
                     "fontWeight": "bold"
@@ -101,6 +119,12 @@ def _(copy, df, pd, start_ul, target_ng):
                 }
             elif  value > (190 - start_ul.value):
                 return {
+                    "backgroundColor": "black",
+                    "color": "white",
+                    "fontWeight": "bold"
+                }
+            elif (value + start_ul.value) < target_ul.value:
+                return {
                     "backgroundColor": "orange",
                     "color": "brown",
                     "fontWeight": "bold"
@@ -110,6 +134,7 @@ def _(copy, df, pd, start_ul, target_ng):
     def recalc_dilution(updated_df):
         '''callback function for editable dataframe'''
         updated_df['diluent (ul)'] = round(((updated_df['ng/ul'] * updated_df['ul DNA']) / target_ng.value) - updated_df['ul DNA'], 2)
+        updated_df['total volume (ul)'] = round(updated_df['diluent (ul)'] + start_ul.value, 1)
 
     def table_to_plate(input_table) -> pd.DataFrame:
         '''convert long-form table into 96-well plate format dataframe'''
@@ -126,23 +151,39 @@ def _(copy, df, pd, start_ul, target_ng):
         all_cols = [str(i) for i in range(1, 13)]
 
         return plate_layout.reindex(index=all_rows, columns=all_cols).fillna(0)
-    return recalc_dilution, style_cell, style_well, table_to_plate
+
+    def mantis_round(x):
+        '''
+        Given a input integer or float, return a list of `[integer, decimal]`, e.g. `4.2` -> `[4,0.2]`.
+        Returns `[0,0]` if `x` < 0
+        '''
+        if x < 0 or x > (190 - start_ul.value):
+            return [0,0]
+        b,a = modf(x)
+        _b = round(b, 1) if b > 0 else 0
+        return [int(a), _b]
+    return (
+        mantis_round,
+        recalc_dilution,
+        style_cell,
+        style_well,
+        table_to_plate,
+    )
 
 
 @app.cell
-def _(file_import, headers, mo, start_ul, target_ng):
+def _(file_import, headers, mo, start_ul, target_ng, target_ul):
     mo.sidebar(
         [
             mo.md(
                 '# DNA Dilutions Calculator'
                 '\nThis worksheet takes your DNA concentrations and formats the water volumes for a dilution plate.'
             ),
-            mo.vstack([
-              file_import,
-              headers,
-              start_ul,
-              target_ng
-            ], align = 'center'),
+            file_import,
+            headers,
+            start_ul,
+            target_ng,
+            target_ul
         ],
         footer = mo.md('<img src="public/gih_logo.png" width="200" />\n\nMade with ❤️ for 🧬')
     )
@@ -169,7 +210,7 @@ def _(example_file, file_import, headers, io, mo, pd):
     /// details | 🔍︎ Example input
     {example_file}
     ///
-    
+
     ///
             """
         )
@@ -214,7 +255,8 @@ def _(colnames, df, mo, start_ul, target_ng):
     df_clean = df[[i.value for i in colnames]]
     df_clean.columns = ['well', 'sample', 'ng/ul']
     df_clean['ul DNA'] = start_ul.value
-    df_clean['diluent (ul)'] = round(((df_clean['ng/ul'] * df_clean['ul DNA']) / target_ng.value) - df_clean['ul DNA'], 2)
+    df_clean['diluent (ul)'] = round(((df_clean['ng/ul'] * df_clean['ul DNA']) / target_ng.value) - df_clean['ul DNA'], 1)
+    df_clean['total volume (ul)'] = round(df_clean['diluent (ul)'] + start_ul.value, 1)
     return (df_clean,)
 
 
@@ -231,7 +273,6 @@ def _(colnames, df_clean, file_import, mo, recalc_dilution):
         input_text,
         mo.accordion({"Variable Volumes" : editor})
     ])
-
     return (editor,)
 
 
@@ -250,11 +291,13 @@ def _(editor, mo, style_cell):
 
 
 @app.cell
-def _(colnames, file_import, mo):
+def _(colnames, file_import, mo, target_ng, target_ul):
     mo.stop(not file_import.value or (any([not i.value for i in colnames])))
-    mo.md(r"""
+    mo.md(fr"""
     ## Resulting DNA Dilutions
-    Negative values for `diluent (ul)` are highlighted in red and indicate that the sample's original concentration is below your desired diluted concentration. Values for `diluent (ul)` highlighted in orange indicate a final volume greater than **190ul**, which would be the maximum volume a standard 96-well microplate can hold without issues.
+    - <strong style="background-color:lightcoral;color:darkred;">Red</strong> highlighted wells have a starting concentration below the target diluted concentration of **{target_ng.value}ul**
+    - <strong style="background-color:orange;color:brown;">Orange</strong> highlighted wells have a final volume below the target minimum volume of **{target_ul.value}ul**
+    - <strong style="background-color:black;color:white;">Black</strong> highlighted wells have a final volume greater than **190ul**, which would be the maximum volume a standard 96-well microplate can hold without issues
     """)
     return
 
@@ -275,25 +318,70 @@ def _(editor, mo, start_ul, style_well, table_to_plate):
 
 
 @app.cell
-def _(mo, pd):
+def _(mantis_round, mo, np, pd):
+    def format_mantis(arr):
+        res = []
+        for row in np.array_split(arr, 8):
+            res.append("\t".join(str(i) for i in row))
+        return "\n".join(res)
+
     def download_mantis(input: pd.DataFrame):
-        all_cols = [str(i) for i in range(1, 13)]
-        res = "," + ",".join(all_cols) + "\n"
-        for r in input.itertuples():
-            res += ",".join([str(i) for i in r]) + "\n"
+        outfile = ["[ Version: 5 ]\nAB0800-96well-on-silver-metal-base.pd.txt"]
+        high_reagent = "Wash + T HV		Normal"
+        low_reagent = "Wash + T LV		Normal"
+        high_vec = []
+        high_tracks = []
+        res_low = ""
+        for r in input.itertuples(index = False):
+            low_chip = []
+            high_chip = []
+            for i in r:
+                vals = mantis_round(i)
+                high_chip.append(vals[0])
+                low_chip.append(str(vals[1]))
+            high_vec += high_chip  
+            res_low  += "\t".join(low_chip) + "\n"
+        track_vol = 0
+        cutoff = 850
+        allwells = [0] * 96
+        for i,well_vol in enumerate(high_vec):
+            track_vol += well_vol
+            if track_vol >= cutoff or i == 95:
+                high_tracks.append(format_mantis(allwells))
+                # reset
+                track_vol = well_vol
+                allwells = [0] * 96
+            allwells[i] = well_vol
+        outfile.append("5\t0\t\t" + "\t\t".join(["U"] * len(high_tracks)) + "\t")
+        outfile.append("1")
+        outfile.append("5\t0\t\t" + "\t\t".join(["0"] * len(high_tracks)) + "\t")
+        for i in high_tracks:
+            outfile.append(high_reagent)
+            outfile.append("Well\t1")
+            outfile.append(i)
+        outfile.append(low_reagent)
+        outfile.append("Well\t1")
+        outfile.append(res_low)
         return mo.download(
-        data=res.encode("utf-8"),
-        filename="manits.dilution.txt",
-        mimetype="text/plain",
-        label="Download as Mantis Configuration",
+            data=("\n".join(outfile)).encode("utf-8"),
+            filename="manits.dilution.dl.txt",
+            mimetype="text/plain",
+            label="Download Mantis config"
     )
     return (download_mantis,)
 
 
 @app.cell
 def _(download_mantis, mo, output_table, plate_fmt):
+    mantis_dl = mo.vstack([
+        download_mantis(plate_fmt.data),
+        mo.md("Use the button above to download the dilution plate as a Mantis configuration file. The configuration sets up a series of steps for the high-volume chip to dispense the diluent up to the integer value of the volume (e.g. `40` of `40.1` ul). The high volume step will be separated into smaller steps to make sure the total dispensed volume does not exceed 850ul so that the diluent can be topped off and proceed to the next series of wells. The final step uses the low-volume chip to dispense the diluent for the remaining <1ul volume (e.g. `0.1` of `40.1` ul). Negative values and values with total expected volumes > `190` will be replaced with `0`.")
+    ])
+
     mo.ui.tabs(
-        {"Plate View": mo.vstack([download_mantis(plate_fmt.data), plate_fmt]), "Table View": output_table},
+        {"Plate View": mo.vstack([plate_fmt, mantis_dl]), 
+         "Table View": output_table
+        },
         label = "Dilution Values", lazy = True
     )
     return
