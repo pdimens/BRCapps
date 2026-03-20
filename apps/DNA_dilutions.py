@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.7"
+__generated_with = "0.21.1"
 app = marimo.App(width="full", app_title="DNA Dilution Calculator")
 
 
@@ -14,6 +14,7 @@ def _():
     import pandas as pd
     import re
     import string
+
     return copy, io, mo, modf, np, pd
 
 
@@ -74,11 +75,6 @@ def _(mo):
 @app.cell
 def _(copy, df, modf, pd, start_ul, target_ng, target_ul):
     # define functions
-    def print_upto(x, n) -> list[str]:
-        '''Given a stringio bytes object `x`, split out lines and return up to `n` lines'''
-        _lines = x.decode("utf-8").split('\n')
-        return _lines[:min(n, len(_lines))]
-
     def parse_well(well):
         '''Function to parse well notation (handles both A1 and A01 as column 1)'''
         row = well[0]  # First character is the row (A-H)
@@ -162,6 +158,7 @@ def _(copy, df, modf, pd, start_ul, target_ng, target_ul):
         b,a = modf(x)
         _b = round(b, 1) if b > 0 else 0
         return [int(a), _b]
+
     return (
         mantis_round,
         recalc_dilution,
@@ -323,12 +320,12 @@ def _(mantis_round, mo, np, pd):
         res = []
         for row in np.array_split(arr, 8):
             res.append("\t".join(str(i) for i in row))
-        return "\n".join(res)
+        return "\r\n".join(res)
 
     def download_mantis(input: pd.DataFrame):
-        outfile = ["[ Version: 5 ]\nAB0800-96well-on-silver-metal-base.pd.txt"]
-        high_reagent = "Wash + T HV		Normal"
-        low_reagent = "Wash + T LV		Normal"
+        outfile = ["[ Version: 5 ]", "AB0800-96well-on-silver-metal-base.pd.txt"]
+        high_reagent = "Wash + T HV\t\tNormal"
+        low_reagent = "Wash + T LV\t\tNormal"
         high_vec = []
         high_tracks = []
         res_low = ""
@@ -340,7 +337,7 @@ def _(mantis_round, mo, np, pd):
                 high_chip.append(vals[0])
                 low_chip.append(str(vals[1]))
             high_vec += high_chip  
-            res_low  += "\t".join(low_chip) + "\n"
+            res_low  += "\t".join(low_chip) + "\r\n"
         track_vol = 0
         cutoff = 850
         allwells = [0] * 96
@@ -362,12 +359,14 @@ def _(mantis_round, mo, np, pd):
         outfile.append(low_reagent)
         outfile.append("Well\t1")
         outfile.append(res_low)
+        outfile.append("\r\n")
         return mo.download(
-            data=("\n".join(outfile)).encode("utf-8"),
+            data=("\r\n".join(outfile)).encode("utf-8"),
             filename="manits.dilution.dl.txt",
             mimetype="text/plain",
             label="Download Mantis config"
     )
+
     return (download_mantis,)
 
 
