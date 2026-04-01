@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.18.4"
+__generated_with = "0.21.1"
 app = marimo.App(width="medium", app_title="Fragment Analysis Library Pooling")
 
 
@@ -8,8 +8,11 @@ app = marimo.App(width="medium", app_title="Fragment Analysis Library Pooling")
 def _():
     import io
     import marimo as mo
+    import matplotlib as plt
+    import numpy as np
     import pandas as pd
     import re
+    import statsmodels.formula.api as smf
 
     example_table = mo.md("""
     | Well | Sample ID | Range             | ng/uL  | % Total | nmole/L | Avg. Size | %CV   | Size Threshold (b.p.) | DQN |
@@ -23,7 +26,7 @@ def _():
     | F3   | sample_2  | 450 bp to 800 bp  | 3.5493 | 39.1    | 10.0215 | 583       | 16.55 | 300                   | 8.8 |
     | F3   | sample_2  | 800 bp to 5500 bp | 1.4898 | 16.4    | 1.9335  | 1268      | 44.82 | 300                   | 8.8 |
     """)
-    return example_table, io, mo, pd, re
+    return example_table, io, mo, np, pd, plt, re
 
 
 @app.cell
@@ -97,6 +100,7 @@ def _(pd, re):
         convert = lambda text: int(text) if text.isdigit() else text.lower()
         alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)]
         return sorted(l, key=alphanum_key)
+
     return natural_sort, process_sample
 
 
@@ -202,6 +206,8 @@ def _(
     target_pmol,
     target_range,
 ):
+    mo.stop(any([i == 0 for i in quants_df.value['concentration (ng/µL)']]))
+
     n_rows = pd.DataFrame(df.groupby('Sample ID').size(),columns=['sample'])
 
     df_with_conc = df.merge(
@@ -270,7 +276,112 @@ def _(calc_table, elution_vol, mo, pd, target_pmol):
         ""],
         widths= [0, 1]
     )
+    return
 
+
+@app.cell
+def _(file_import, mo, quants_df):
+    mo.stop(not file_import.value or mo.stop(any([i == 0 for i in quants_df.value['concentration (ng/µL)']])))
+
+    model_text = mo.md("----\n## Model and Scale\nUsing the data above, we can create a fitted model (non-linear least squares via log(x)) that will help scale the concentrations of the other libraries made alongside these that were not submitted for fragment analysis.")
+
+    samples_import = mo.ui.file(
+        kind="area",
+        filetypes = [".csv", ".CSV", ".Csv"],
+        label = "Import a CSV file of samples and their concentrations here."
+    )
+
+    headers = mo.ui.switch(value= True, label = "file has column headers")
+    mo.vstack([model_text, samples_import, headers])
+    return headers, samples_import
+
+
+@app.cell
+def _(file_import, headers, io, mo, pd, samples_import):
+    mo.stop(not samples_import.value)
+
+    try:
+        libdf = pd.read_table(io.BytesIO(samples_import.value[0].contents), header= 0 if headers.value else None, engine='python', sep=None)
+        libdf.columns = [i.lower() for i in libdf.columns]
+    except Exception:
+        is_err = True
+        err_md = mo.md(f"""
+        /// error| Invalid input file
+
+        The `pandas` parser failed to read the input file. Please check that it conforms to a tabular comma delimited file. The first 200 bytes of the uploaded file:
+
+        ///
+        """)
+        err = mo.vstack([err_md, mo.md(f"```\n{file_import.value[0].contents[:200]}\n```")])
+        mo.stop(is_err, err)
+
+    colnames = mo.ui.array([
+        mo.ui.dropdown(options=list(libdf.columns), label=f"Sample Names"),
+        mo.ui.dropdown(options=list(libdf.columns), label=f"Concentration"),
+    ],
+        label = "Column Names"
+    )
+    mo.vstack([
+        mo.md("Please select the columns in your input file with the sample names and library concentrations."),
+        mo.ui.table(libdf.head(3), selection = None, show_column_summaries=False, show_data_types=False, show_download = False),
+        mo.hstack(colnames, justify="start")
+    ])
+    return colnames, libdf
+
+
+@app.cell
+def _(calc_table, colnames, libdf, mo, np, samples_import):
+    mo.stop(
+        not samples_import.value,
+        mo.md(
+            f"""
+    /// admonition| Library concentration file required
+
+    ///
+            """
+        )
+    )
+    #----------
+    from sklearn.linear_model import LinearRegression
+
+    x = np.log(calc_table["Sample ng/µL"].values).reshape(-1, 1)
+    y = calc_table["Corrected ng/µL"].values
+
+    fit = LinearRegression().fit(x, y)
+
+    # Predict
+    x_seq = libdf[colnames[-1].value].values
+    y_pred = fit.predict(np.log(x_seq).reshape(-1, 1))
+    return fit, x, x_seq, y, y_pred
+
+
+@app.cell
+def _(calc_table, fit, plt, x, x_seq, y, y_pred):
+    rsq = f"R² = {fit.score(x, y):.3f}"
+    plt.pyplot.scatter(calc_table["Sample ng/µL"], calc_table["Corrected ng/µL"], color="black", label="Frag Data")
+    plt.pyplot.scatter(x_seq, y_pred, facecolors='none', edgecolors='dodgerblue', label="Corrected Libraries")
+    plt.pyplot.xlabel("Sample ng/µL")
+    plt.pyplot.ylabel("Corrected ng/µL")
+    plt.pyplot.ylim(0, None)
+    plt.pyplot.title(f"Model Fit ({rsq})")
+    plt.pyplot.legend()
+    plt.pyplot.gcf()
+    return
+
+
+@app.cell
+def _(colnames, libdf, mo, pd, x_seq, y_pred):
+    mo.ui.table(
+        pd.DataFrame(
+            {
+                "Sample" : libdf[colnames[0].value].values,
+                "Sample ng/µL": x_seq,
+                "Frag-Corrected ng/µL" : y_pred.round(2)}
+        ),
+        selection=None,
+        show_data_types=False,
+        show_column_summaries=False
+    )
     return
 
 
