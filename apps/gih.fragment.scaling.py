@@ -8,10 +8,11 @@ app = marimo.App(width="medium", app_title="Fragment Analysis Library Pooling")
 def _():
     import io
     import marimo as mo
-    import matplotlib as plt
+    import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
     import re
+    from sklearn.linear_model import LinearRegression
     import statsmodels.formula.api as smf
 
     example_table = mo.md("""
@@ -26,63 +27,37 @@ def _():
     | F3   | sample_2  | 450 bp to 800 bp  | 3.5493 | 39.1    | 10.0215 | 583       | 16.55 | 300                   | 8.8 |
     | F3   | sample_2  | 800 bp to 5500 bp | 1.4898 | 16.4    | 1.9335  | 1268      | 44.82 | 300                   | 8.8 |
     """)
-    return example_table, io, mo, np, pd, plt, re
 
-
-@app.cell
-def _(mo):
-    file_import = mo.ui.file(
-        kind="area",
-        filetypes = [".csv", ".CSV", ".Csv"],
-        label = "Drag and drop the fragment analysis CSV file here, or click to open file browser"
-    )
-    return (file_import,)
-
-
-@app.cell
-def _(file_import, mo):
-    mo.sidebar(
-        [
-            mo.md('# Fragment Analysis Scaled Concentrations\nThis worksheet scales the concentration of your samples based on the proportion of representation of your target fragment interval as determined by fragment analysis.'),
-            file_import
-        ],
-        footer = mo.md('<img src="public/gih_logo.png" width="200" />\n\nMade with ❤️ for 🧬')
-    )
-    return
-
-
-@app.cell
-def _(example_table, mo):
-    mo.md(f"""
-    ## Import Data
-    Use the file importer in the left sidebar to load the data from the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which fragment size interval you are interested in performing a scaled concentration correction on.
-
-    {mo.accordion({
-        "🔍︎ Example CSV File": example_table,
-        "⚠️ Notes and Considerations" : mo.md("**First row skipped**: Be aware that the first interval (sorted alphanumerically) of each sample, usually 10bp-100bp, is skipped in the calculations below.\n\n**Singletons skipped**: Rows with a `Sample ID` that only appears once are removed (e.g. a ladder, samples from a different run).\n\n**Consistency**: The target range is expected to be consistent across all samples.")
-    })}
+    sample_table = mo.md("""
+    | Sample | Conc |
+    |:-------|:-----|
+    | sample_1 | 1.2 |
+    | sample_2 | 0.74 |
     """)
-    return
+    return (
+        LinearRegression,
+        example_table,
+        io,
+        mo,
+        np,
+        pd,
+        plt,
+        re,
+        sample_table,
+    )
 
 
 @app.cell
 def _(pd, re):
-    def process_sample(group, target_identifier, all_intervals, picomoles):
+    def process_sample(group, target_identifier, all_intervals):
         target_row = group[group['Range'] == target_identifier].iloc[0]
         corrected_sum = group[group['Range'] != all_intervals[0]]['ng/µL'].sum()
-        #group[group['Range'] != '10 to 100 bp']['ng/µL'].sum()
-        #corrected_sum = group['ng/µL'].iloc[1:].sum()
         target_conc = target_row['ng/µL']
         target_size = target_row['Avg. Size']
         sample_id = target_row['Sample ID']
         corrected_smear = target_conc/corrected_sum
         quant = target_row['concentration (ng/µL)']
         nM = (quant * corrected_smear) / (target_size * 660) * 1000000
-        if nM > 0:
-            vol_to_pool = picomoles / nM
-        else:
-            vol_to_pool = 0
-        ng_primary_lib = quant * vol_to_pool
         return pd.Series(
             {
             'Sample ID': sample_id,
@@ -91,9 +66,7 @@ def _(pd, re):
             'Window ng/µL': round(target_conc,3),
             'Sample ng/µL': quant,
             'Est. nM': round(nM, 2),
-            'Corrected ng/µL': round(quant * corrected_smear,3),
-            'Volume to Pool': round(vol_to_pool, 2),
-            'ng Primary Library': round(ng_primary_lib, 1)
+            'Corrected ng/µL': round(quant * corrected_smear,3)
         })
 
     def natural_sort(l): 
@@ -105,10 +78,89 @@ def _(pd, re):
 
 
 @app.cell
+def _(mo):
+    file_import = mo.ui.file(
+        kind="area",
+        filetypes = [".csv", ".CSV", ".Csv"],
+        label = "Import fragment analysis CSV file here"
+    )
+
+    samples_import = mo.ui.file(
+        kind="button",
+        filetypes = [".csv", ".CSV", ".Csv"],
+        label = "Import"
+    )
+
+    sampleheaders = mo.ui.switch(value= True, label = "Sample file has column headers")
+    return file_import, sampleheaders, samples_import
+
+
+@app.cell
+def _(file_import, mo, sampleheaders, samples_import):
+    mo.sidebar(
+        [
+            mo.md('# Frag-Scaled Molarity\nThis worksheet scales the concentration/molarity of samples with the proportional to your target fragment interval as determined by fragment analysis.'),
+            mo.vstack([mo.md("### Sample concentrations"),samples_import, sampleheaders]),
+            file_import
+        ],
+        footer = mo.md('<img src="public/gih_logo.png" width="200" />\n\nMade with ❤️ for 🧬')
+    )
+    return
+
+
+@app.cell
+def _(mo, sample_table, samples_import):
+    mo.md(f"""
+    ## {'▷' if not samples_import.value else '✅'} Import Sample Concentrations
+    Using the left sidebar, import a CSV file of samples and their concentrations. This file should  at minimum feature samples used in the fragment analysis.
+
+    {mo.accordion({"🔍︎ Example Sample Concentration File" : sample_table})}
+    """)
+    return
+
+
+@app.cell
+def _(file_import, io, mo, pd, sampleheaders, samples_import):
+    mo.stop(
+        not samples_import.value,
+        mo.md("/// admonition| Sample file required\n\nCannot proceed until the file is uploaded\n///")
+    )
+
+    try:
+        sampdf = pd.read_csv(io.BytesIO(samples_import.value[0].contents), header= 0 if sampleheaders.value else None)
+        sampdf.columns = [i.lower() for i in sampdf.columns]
+    except Exception:
+        is_err = True
+        err_md = mo.md(f"""
+        /// error| Invalid input file
+
+        The `pandas` parser failed to read the input file. Please check that it conforms to a tabular comma delimited file. The first 200 bytes of the uploaded file:
+
+        ///
+        """)
+        mo.stop(
+            is_err,
+            mo.vstack([err_md, mo.md(f"```\n{file_import.value[0].contents[:200]}\n```")])
+        )
+    return (sampdf,)
+
+
+@app.cell
+def _(example_table, file_import, mo):
+    mo.vstack([
+         mo.md(f"""## {'▷' if not file_import.value else '✅'} Import Smear Analysis\nUsing the left sidebar, import the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which fragment size interval you are interested in performing a scaled concentration correction on."""),
+        mo.accordion({
+        "🔍︎ Example Fragment Analyzer CSV File": example_table,
+        "⚠️ Notes and Considerations" : mo.md("**First row skipped**: Be aware that the first interval (sorted alphanumerically) of each sample, usually 10bp-100bp, is skipped in the calculations below.\n\n**Singletons skipped**: Rows with a `Sample ID` that only appears once are removed (e.g. a ladder, samples from a different run).\n\n**Consistency**: The target range is expected to be consistent across all samples.")})
+    ])
+    return
+
+
+@app.cell
 def _(file_import, io, mo, pd):
     mo.stop(
         not file_import.value,
-        mo.md("/// admonition| Input file required\n\nCannot proceed until a CSV file is uploaded\n///")
+        mo.md("/// admonition| Smear analysis file required\n\nCannot proceed until the file is uploaded\n///")
     )
 
     df = pd.read_csv(io.BytesIO(file_import.value[0].contents))
@@ -130,94 +182,105 @@ def _(file_import, io, mo, pd):
 
 
 @app.cell
-def _(df, natural_sort):
-    sample_id = list(set(df['Sample ID']))
+def _(df, mo, natural_sort, sampdf):
     intervals = natural_sort(set(df['Range']))
-    return (intervals,)
+    target_range = mo.ui.radio(intervals, value = intervals[-2], inline = True)
+
+    colnames = mo.ui.array([
+        mo.ui.dropdown(options=list(sampdf.columns), label=f"Sample Names"),
+        mo.ui.dropdown(options=list(sampdf.columns), label=f"Concentration"),
+    ],
+        label = "Column Names"
+    )
+    return colnames, intervals, target_range
 
 
 @app.cell
-def _(df, file_import, mo):
-    mo.ui.table(
+def _(colnames, file_import, mo, samples_import, target_range):
+    mo.stop(not file_import.value or not samples_import.value)
+
+    mo.vstack([
+        mo.md(f"### {'▷' if any([not i.value for i in colnames]) else '✅'} Configure Imports\nColumns in sample-concentration file:"),
+        mo.hstack(colnames, justify="start"),
+        mo.md("Target genomic size range for the samples:"),
+        target_range
+    ])
+    return
+
+
+@app.cell
+def _(colnames, file_import, samples_import):
+    imports_finished = not samples_import.value or any([not i.value for i in colnames]) or not file_import.value
+    return (imports_finished,)
+
+
+@app.cell
+def _(colnames, df, imports_finished, mo, sampdf):
+    mo.stop(imports_finished)
+    quants_df = sampdf[[colnames[0].value, colnames[1].value]].rename(columns={colnames[0].value: 'Sample ID', colnames[1].value: 'concentration (ng/µL)'})
+
+    lib_id = list(set(quants_df['Sample ID']))
+    id_err = False
+
+    try:
+        sample_id = list(set(df['Sample ID']))
+        if set(sample_id).intersection(set(lib_id)) != set(sample_id):
+            raise ValueError
+    except ValueError:
+        id_err = True
+        mo.stop(
+            True,
+            mo.md(f"""/// error| Sample mismatch\n
+    The sample concentration file does not contain the same samples as the smear analysis file. Samples in smear analysis missing in concentration file:\n\n
+    {'\n\n'.join(set(sample_id).difference(set(sample_id).intersection(set(lib_id))))}
+    ///""")
+        )
+    return id_err, quants_df
+
+
+@app.cell
+def _(df, file_import, id_err, imports_finished, mo):
+    mo.stop(imports_finished or id_err)
+    mo.accordion({
+        "View Smear Data": mo.ui.table(
         df,
-        label = f"##Smear Analysis\nFile: **{file_import.value[0].name}**",
+        label = f"## Smear Analysis\nFile: **{file_import.value[0].name}**",
         show_column_summaries=False,
         freeze_columns_left=["Sample ID"],
         show_data_types = False,
         selection = None,
         pagination = False,
-        max_height=400
+        max_height=200
+        )
+    }
     )
     return
-
-
-@app.cell
-def _(intervals, mo):
-    target_range = mo.ui.radio(intervals, value = intervals[-2], inline = True, label="Target range for the samples: ")
-    target_pmol = mo.ui.slider(
-        value = 15.0,
-        start = 0.1,
-        stop = 50.0,
-        step = 0.1,
-        include_input = True,
-        full_width = True,
-        label = "Target **picomoles** for final Libraries"
-    )
-    return target_pmol, target_range
-
-
-@app.cell
-def _(mo, target_pmol, target_range):
-    mo.vstack([target_range, target_pmol])
-    return
-
-
-@app.cell
-def _(df, mo, pd):
-    input_header = mo.md("##Sample Concentrations\nUsing this interactive form, input the concentrations for each sample in **ng/µL** (nanograms per microliter).")
-
-    def unique(sequence):
-        seen = set()
-        return [x for x in sequence if not (x in seen or seen.add(x))]
-    samples_id = unique(df['Sample ID'])
-
-    quants_df = mo.ui.data_editor(
-        pd.DataFrame({
-            'Sample ID' : list(samples_id),
-            'concentration (ng/µL)': [0.0 for i in range(len(samples_id))]
-        }),
-        editable_columns= ['concentration (ng/µL)'],
-        label = "Add sample concentrations here",
-        pagination= False
-    )
-
-    mo.vstack([input_header,quants_df], gap = 0)
-    return (quants_df,)
 
 
 @app.cell
 def _(
     df,
+    id_err,
+    imports_finished,
     intervals,
     mo,
     pd,
     process_sample,
     quants_df,
-    target_pmol,
     target_range,
 ):
-    mo.stop(any([i == 0 for i in quants_df.value['concentration (ng/µL)']]))
+    mo.stop(imports_finished or id_err)
 
     n_rows = pd.DataFrame(df.groupby('Sample ID').size(),columns=['sample'])
 
     df_with_conc = df.merge(
-        quants_df.value,
+        quants_df,
         left_on='Sample ID',
         right_on='Sample ID',
         how="left"
     )
 
-    calc_table = df_with_conc.groupby('Well', sort = False).apply(lambda group: process_sample(group, target_range.value, intervals, target_pmol.value), include_groups=False)
+    calc_table = df_with_conc.groupby('Well', sort = False).apply(lambda group: process_sample(group, target_range.value, intervals), include_groups=False)
     mo.ui.table(
         calc_table,
         pagination = False,
@@ -231,157 +294,127 @@ def _(
 
 
 @app.cell
-def _(file_import, mo):
-    mo.stop(not file_import.value)
-    elution_vol = mo.ui.slider(
-        value = 20,
-        start = 1,
-        stop = 100,
-        step = 1,
-        include_input = True,
-        full_width = True,
-        label = "Volume to elute in (µL)"
-    )
-    elution_vol
-    return (elution_vol,)
+def _(id_err, imports_finished, mo):
+    mo.stop(imports_finished or id_err)
 
+    mo.md("----\n## Model and Scale\nUsing the data above, we can create a fitted model (non-linear least squares via log(x)) that will help scale the concentrations of the other libraries made alongside these that were not submitted for fragment analysis.")
 
-@app.cell
-def _(calc_table, elution_vol, mo, pd, target_pmol):
-    total_vol = calc_table['Volume to Pool'].sum()
-    total_ng = calc_table['ng Primary Library'].sum()
-    total_pM = target_pmol.value * len(calc_table.index)
-
-    pool_ngul = 0 if total_vol == 0 else round(total_ng / total_vol,1)
-    pool_uM = 0 if total_vol == 0 else total_pM / total_vol
-    recovery = round(pool_uM * total_vol / elution_vol.value, 2)
-
-    def style_cell(_rowId, _columnName, value):
-        if _columnName == "Value":
-            return {"fontWeight": "bold"}
-        return {}
-
-    mo.hstack(
-        [mo.ui.table(
-            pd.DataFrame({
-                "Metric" : ["Total Volume of Pool (µL)", "Total ng Across Pools", "Pool ng/µL", "Total pM across intervals", "µM Per Pool across intervals", "µM Per Pool assuming 100% recovery"],
-                "Value" : [round(total_vol,2), total_ng, round(pool_ngul,2) , total_pM, round(pool_uM,1), recovery]
-            }),
-            label = "## Final Pooling Metrics",
-            show_data_types = False,
-            style_cell = style_cell,
-            pagination = False,
-            selection = None
-        ),
-        ""],
-        widths= [0, 1]
-    )
     return
 
 
 @app.cell
-def _(file_import, mo, quants_df):
-    mo.stop(not file_import.value or mo.stop(any([i == 0 for i in quants_df.value['concentration (ng/µL)']])))
-
-    model_text = mo.md("----\n## Model and Scale\nUsing the data above, we can create a fitted model (non-linear least squares via log(x)) that will help scale the concentrations of the other libraries made alongside these that were not submitted for fragment analysis.")
-
-    samples_import = mo.ui.file(
-        kind="area",
-        filetypes = [".csv", ".CSV", ".Csv"],
-        label = "Import a CSV file of samples and their concentrations here."
-    )
-
-    headers = mo.ui.switch(value= True, label = "file has column headers")
-    mo.vstack([model_text, samples_import, headers])
-    return headers, samples_import
-
-
-@app.cell
-def _(file_import, headers, io, mo, pd, samples_import):
-    mo.stop(not samples_import.value)
-
-    try:
-        libdf = pd.read_table(io.BytesIO(samples_import.value[0].contents), header= 0 if headers.value else None, engine='python', sep=None)
-        libdf.columns = [i.lower() for i in libdf.columns]
-    except Exception:
-        is_err = True
-        err_md = mo.md(f"""
-        /// error| Invalid input file
-
-        The `pandas` parser failed to read the input file. Please check that it conforms to a tabular comma delimited file. The first 200 bytes of the uploaded file:
-
-        ///
-        """)
-        err = mo.vstack([err_md, mo.md(f"```\n{file_import.value[0].contents[:200]}\n```")])
-        mo.stop(is_err, err)
-
-    colnames = mo.ui.array([
-        mo.ui.dropdown(options=list(libdf.columns), label=f"Sample Names"),
-        mo.ui.dropdown(options=list(libdf.columns), label=f"Concentration"),
-    ],
-        label = "Column Names"
-    )
-    mo.vstack([
-        mo.md("Please select the columns in your input file with the sample names and library concentrations."),
-        mo.ui.table(libdf.head(3), selection = None, show_column_summaries=False, show_data_types=False, show_download = False),
-        mo.hstack(colnames, justify="start")
-    ])
-    return colnames, libdf
-
-
-@app.cell
-def _(calc_table, colnames, libdf, mo, np, samples_import):
-    mo.stop(
-        not samples_import.value,
-        mo.md(
-            f"""
-    /// admonition| Library concentration file required
-
-    ///
-            """
-        )
-    )
-    #----------
-    from sklearn.linear_model import LinearRegression
+def _(
+    LinearRegression,
+    calc_table,
+    id_err,
+    imports_finished,
+    mo,
+    np,
+    quants_df,
+):
+    mo.stop(imports_finished or id_err)
 
     x = np.log(calc_table["Sample ng/µL"].values).reshape(-1, 1)
     y = calc_table["Corrected ng/µL"].values
+    nMy = calc_table["Est. nM"].values
+    Sizey = calc_table["Avg.Size"].values
 
     fit = LinearRegression().fit(x, y)
+    Molarityfit = LinearRegression().fit(x, nMy)
+    Sizefit = LinearRegression().fit(x, Sizey)
 
     # Predict
-    x_seq = libdf[colnames[-1].value].values
+    x_seq = quants_df['concentration (ng/µL)'].values
+
     y_pred = fit.predict(np.log(x_seq).reshape(-1, 1))
-    return fit, x, x_seq, y, y_pred
+    rsq = f"R² = {fit.score(x, y):.3f}"
+
+    nMy_pred = Molarityfit.predict(np.log(x_seq).reshape(-1, 1))
+    nM_rsq = f"R² = {Molarityfit.score(x, nMy):.3f}"
+
+    size_pred = Sizefit.predict(np.log(x_seq).reshape(-1, 1))
+    return nM_rsq, nMy_pred, rsq, size_pred, x_seq, y_pred
 
 
 @app.cell
-def _(calc_table, fit, plt, x, x_seq, y, y_pred):
-    rsq = f"R² = {fit.score(x, y):.3f}"
-    plt.pyplot.scatter(calc_table["Sample ng/µL"], calc_table["Corrected ng/µL"], color="black", label="Frag Data")
-    plt.pyplot.scatter(x_seq, y_pred, facecolors='none', edgecolors='dodgerblue', label="Corrected Libraries")
-    plt.pyplot.xlabel("Sample ng/µL")
-    plt.pyplot.ylabel("Corrected ng/µL")
-    plt.pyplot.ylim(0, None)
-    plt.pyplot.title(f"Model Fit ({rsq})")
-    plt.pyplot.legend()
-    plt.pyplot.gcf()
+def _(
+    calc_table,
+    id_err,
+    imports_finished,
+    mo,
+    nM_rsq,
+    nMy_pred,
+    plt,
+    rsq,
+    x_seq,
+    y_pred,
+):
+    mo.stop(imports_finished or id_err)
+
+    fig, axes = plt.subplots(2,1,sharex=True, figsize=(10, 5))
+
+    # Plot on the first axes
+    axes[0].set_title(f"Concentration ({rsq})")
+    axes[0].scatter(calc_table["Sample ng/µL"], calc_table["Corrected ng/µL"], color="black", label="Frag Data")
+    axes[0].scatter(x_seq, y_pred, facecolors='none', edgecolors='dodgerblue', label="Modeled Libraries")
+    axes[0].set_xlabel("Sample ng/µL")
+    axes[0].set_ylabel("Corrected ng/µL")
+    axes[0].set_ylim(0, None)
+    axes[0].legend()
+
+    # Plot on the second axes
+    axes[1].set_title(f"Molarity ({nM_rsq})")
+    axes[1].scatter(calc_table["Sample ng/µL"], calc_table["Est. nM"], color="black", label="Frag Data")
+    axes[1].scatter(x_seq, nMy_pred, facecolors='none', edgecolors='darkseagreen', label="Modeled Libraries")
+    axes[1].set_xlabel("Sample ng/µL")
+    axes[1].set_ylabel("Estimated nM")
+    axes[1].set_ylim(0, None)
+    axes[1].legend()
+
+    # 4. Use tight_layout to prevent label overlap
+    plt.tight_layout()
+    plt.gcf()
     return
 
 
 @app.cell
-def _(colnames, libdf, mo, pd, x_seq, y_pred):
-    mo.ui.table(
-        pd.DataFrame(
+def _(nMy_pred, pd, quants_df, size_pred, x_seq, y_pred):
+    def warn_cell(row_id, column_name, value):
+        # row_id is a string index; look up the target column value for this row
+        try:
+            row_val = frag_scaled_concs.iloc[int(row_id)]["Frag-Corrected ng/µL"]
+            if isinstance(row_val, (int, float)) and row_val <= 0:
+                return {"backgroundColor": "lightcoral", "color": "white"}
+        except (ValueError, KeyError, IndexError):
+            pass
+        return {}
+
+    frag_scaled_concs = pd.DataFrame(
             {
-                "Sample" : libdf[colnames[0].value].values,
-                "Sample ng/µL": x_seq,
-                "Frag-Corrected ng/µL" : y_pred.round(2)}
-        ),
-        selection=None,
-        show_data_types=False,
-        show_column_summaries=False
-    )
+                "Sample" : quants_df['Sample ID'].values,
+                "Quant ng/µL": x_seq,
+                "Frag-Corrected ng/µL" : y_pred.round(2),
+                "Average Fragment Size": size_pred.round(),
+                "Estimated nM" : nMy_pred.round(2)
+            }
+        )
+    return frag_scaled_concs, warn_cell
+
+
+@app.cell
+def _(frag_scaled_concs, mo, warn_cell):
+    dropouts = sum([i <= 0 for i in frag_scaled_concs["Frag-Corrected ng/µL"].values])
+
+    mo.vstack([
+        mo.md(f"Obvious dropouts: **{dropouts}** (highlighted in red)"),
+        mo.ui.table(
+            frag_scaled_concs,
+            page_size = 24,
+            show_data_types=False,
+            show_column_summaries=False,
+            style_cell=warn_cell
+        )
+    ])
     return
 
 
