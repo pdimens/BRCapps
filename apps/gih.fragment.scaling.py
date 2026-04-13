@@ -298,7 +298,6 @@ def _(id_err, imports_finished, mo):
     mo.stop(imports_finished or id_err)
 
     mo.md("----\n## Model and Scale\nUsing the data above, we can create a fitted model (non-linear least squares via log(x)) that will help scale the concentrations of the other libraries made alongside these that were not submitted for fragment analysis.")
-
     return
 
 
@@ -314,10 +313,12 @@ def _(
 ):
     mo.stop(imports_finished or id_err)
 
-    x = np.log(calc_table["Sample ng/µL"].values).reshape(-1, 1)
-    y = calc_table["Corrected ng/µL"].values
-    nMy = calc_table["Est. nM"].values
-    Sizey = calc_table["Avg.Size"].values
+    predict_table = calc_table[calc_table["Sample ng/µL"] >= 0.2]
+
+    x = np.log(predict_table["Sample ng/µL"].values).reshape(-1, 1)
+    y = predict_table["Corrected ng/µL"].values
+    nMy = predict_table["Est. nM"].values
+    Sizey = predict_table["Avg.Size"].values
 
     fit = LinearRegression().fit(x, y)
     Molarityfit = LinearRegression().fit(x, nMy)
@@ -382,9 +383,12 @@ def _(nMy_pred, pd, quants_df, size_pred, x_seq, y_pred):
     def warn_cell(row_id, column_name, value):
         # row_id is a string index; look up the target column value for this row
         try:
-            row_val = frag_scaled_concs.iloc[int(row_id)]["Frag-Corrected ng/µL"]
-            if isinstance(row_val, (int, float)) and row_val <= 0:
-                return {"backgroundColor": "lightcoral", "color": "white"}
+            row_val = frag_scaled_concs.iloc[int(row_id)]["Estimated nM"]
+            if isinstance(row_val, (int, float)):
+                if row_val <= 0:
+                    return {"backgroundColor": "lightcoral", "color": "white"}
+                elif row_val < 0.3:
+                    return {"backgroundColor": "#f3a155", "color": "white"}
         except (ValueError, KeyError, IndexError):
             pass
         return {}
@@ -403,10 +407,11 @@ def _(nMy_pred, pd, quants_df, size_pred, x_seq, y_pred):
 
 @app.cell
 def _(frag_scaled_concs, mo, warn_cell):
-    dropouts = sum([i <= 0 for i in frag_scaled_concs["Frag-Corrected ng/µL"].values])
+    dropouts = sum([i <= 0 for i in frag_scaled_concs["Estimated nM"].values])
+    likelydropouts = sum([(i > 0 and i < 0.3) for i in frag_scaled_concs["Estimated nM"].values])
 
     mo.vstack([
-        mo.md(f"Obvious dropouts: **{dropouts}** (highlighted in red)"),
+        mo.md(f"Obvious dropouts: **{dropouts}** (red) | Likely dropouts: **{likelydropouts}** (orange)"),
         mo.ui.table(
             frag_scaled_concs,
             page_size = 24,

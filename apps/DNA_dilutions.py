@@ -38,7 +38,7 @@ def _(mo):
     )
 
     target_ng = mo.ui.slider(
-        value = 5,
+        value = 0.3,
         start = 0.1,
         stop = 10,
         step = 0.1,
@@ -130,7 +130,7 @@ def _(copy, df, modf, pd, start_ul, target_ng, target_ul):
     def recalc_dilution(updated_df):
         '''callback function for editable dataframe'''
         updated_df['diluent (ul)'] = round(((updated_df['ng/ul'] * updated_df['ul DNA']) / target_ng.value) - updated_df['ul DNA'], 2)
-        updated_df['total volume (ul)'] = round(updated_df['diluent (ul)'] + start_ul.value, 1)
+        updated_df['total volume (ul)'] = round(updated_df['diluent (ul)'] + updated_df['ul DNA'], 1)
 
     def table_to_plate(input_table) -> pd.DataFrame:
         '''convert long-form table into 96-well plate format dataframe'''
@@ -349,9 +349,9 @@ def _(mantis_round, mo, np, pd):
                 track_vol = well_vol
                 allwells = [0] * 96
             allwells[i] = well_vol
-        outfile.append("5\t0\t\t" + "\t\t".join(["U"] * len(high_tracks)) + "\t")
+        outfile.append(f"{len(high_tracks)+1}\t0\t\t" + "\t\t".join(["U"] * len(high_tracks)) + "\t")
         outfile.append("1")
-        outfile.append("5\t0\t\t" + "\t\t".join(["0"] * len(high_tracks)) + "\t")
+        outfile.append(f"{len(high_tracks)+1}\t0\t\t" + "\t\t".join(["0"] * len(high_tracks)) + "\t")
         for i in high_tracks:
             outfile.append(high_reagent)
             outfile.append("Well\t1")
@@ -359,7 +359,6 @@ def _(mantis_round, mo, np, pd):
         outfile.append(low_reagent)
         outfile.append("Well\t1")
         outfile.append(res_low)
-        outfile.append("\r\n")
         return mo.download(
             data=("\r\n".join(outfile)).encode("utf-8"),
             filename="manits.dilution.dl.txt",
