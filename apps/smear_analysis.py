@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.23.1"
 app = marimo.App(width="medium", app_title="Smear-Scaled Concentrations")
 
 
@@ -69,20 +69,6 @@ def _(elution_vol, file_import, mo, target_pmol):
 
 
 @app.cell
-def _(example_table, mo):
-    mo.md(f"""
-    ## Import Data
-    Use the file importer in the left sidebar to load the data from the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which fragment size interval you are interested in performing a scaled concentration correction on.
-
-    {mo.accordion({
-        "🔍︎ Example CSV File": example_table,
-        "⚠️ Notes and Considerations" : mo.md("**First row skipped**: Be aware that the first interval (sorted alphanumerically) of each sample, usually 10bp-100bp, is skipped in the calculations below.\n\n**Singletons skipped**: Rows with a `Sample ID` that only appears once are removed (e.g. a ladder, samples from a different run).\n\n**Consistency**: The target range is expected to be consistent across all samples.")
-    })}
-    """)
-    return
-
-
-@app.cell
 def _(pd, re):
     def process_sample(group, target_identifier, all_intervals, picomoles):
         target_row = group[group['Range'] == target_identifier].iloc[0]
@@ -122,10 +108,18 @@ def _(pd, re):
 
 
 @app.cell
-def _(file_import, io, mo, pd):
+def _(example_table, file_import, io, mo, pd):
     mo.stop(
         not file_import.value,
-        mo.md("/// admonition| Input file required\n///")
+        mo.md(f"""## Import Data
+    Use the file importer in the left sidebar to load the data from the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which fragment size interval you are interested in performing a scaled concentration correction on.
+
+    {mo.accordion({
+        "🔍︎ Example CSV File": example_table,
+        "⚠️ Notes and Considerations" : mo.md("**First row skipped**: Be aware that the first interval (sorted alphanumerically) of each sample, usually 10bp-100bp, is skipped in the calculations below.\n\n**Singletons skipped**: Rows with a `Sample ID` that only appears once are removed (e.g. a ladder, samples from a different run).\n\n**Consistency**: The target range is expected to be consistent across all samples.")
+    })}
+
+    /// admonition| Input file required\n///""")
     )
 
     df = pd.read_csv(io.BytesIO(file_import.value[0].contents))
@@ -148,9 +142,12 @@ def _(file_import, io, mo, pd):
 
 
 @app.cell
-def _(df, natural_sort):
+def _(df, mo, natural_sort):
     sample_id = list(set(df['Sample ID']))
     intervals = natural_sort(set(df['Range']))
+    mo.accordion({
+        "⚠️ Notes and Considerations" : mo.md("**First row skipped**: Be aware that the first interval (sorted alphanumerically) of each sample, usually 10bp-100bp, is skipped in the calculations below.\n\n**Singletons skipped**: Rows with a `Sample ID` that only appears once are removed (e.g. a ladder, samples from a different run).\n\n**Consistency**: The target range is expected to be consistent across all samples.")
+    })
     return (intervals,)
 
 
@@ -172,7 +169,6 @@ def _(df, file_import, mo):
 @app.cell
 def _(intervals, mo):
     target_range = mo.ui.radio(intervals, value = intervals[-2], inline = True, label="Target range for the samples: ")
-
     return (target_range,)
 
 
