@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.23.1"
 app = marimo.App(width="medium", app_title="Fragment Analysis Library Pooling")
 
 
@@ -82,25 +82,28 @@ def _(mo):
     file_import = mo.ui.file(
         kind="area",
         filetypes = [".csv", ".CSV", ".Csv"],
-        label = "Import fragment analysis CSV file here"
+        label = "Import smear CSV"
     )
 
     samples_import = mo.ui.file(
-        kind="button",
+        kind="area",
         filetypes = [".csv", ".CSV", ".Csv"],
-        label = "Import"
+        label = "Import Concentrations"
     )
 
-    sampleheaders = mo.ui.switch(value= True, label = "Sample file has column headers")
-    return file_import, sampleheaders, samples_import
+    sampleheaders = mo.ui.switch(value= True, label = "Headers in Sample file")
+
+    LogorLinear = mo.ui.radio(["Linear Model", "Log Model"], value = "Log Model", label = "Choose a model to use for imputation", inline = True)
+    return LogorLinear, file_import, sampleheaders, samples_import
 
 
 @app.cell
 def _(file_import, mo, sampleheaders, samples_import):
     mo.sidebar(
         [
-            mo.md('# Frag-Scaled Molarity\nThis worksheet scales the concentration/molarity of samples with the proportional to your target fragment interval as determined by fragment analysis.'),
+            mo.md('# Smear-Imputed Molarity\nThis worksheet scales the concentration/molarity of samples with the proportional to your target fragment interval as determined by fragment (smear) analysis.'),
             mo.vstack([mo.md("### Sample concentrations"),samples_import, sampleheaders]),
+            mo.md("### Smear Analysis"),
             file_import
         ],
         footer = mo.md('<img src="public/gih_logo.png" width="200" />\n\nMade with ❤️ for 🧬')
@@ -110,17 +113,22 @@ def _(file_import, mo, sampleheaders, samples_import):
 
 @app.cell
 def _(mo, sample_table, samples_import):
-    mo.md(f"""
-    ## {'▷' if not samples_import.value else '✅'} Import Sample Concentrations
+    if not samples_import.value:
+        import_text = mo.vstack([
+            mo.md("""## ▷ Import Sample Concentrations
     Using the left sidebar, import a CSV file of samples and their concentrations. This file should  at minimum feature samples used in the fragment analysis.
+        """),
+            mo.accordion({"🔍︎ Example Sample Concentration File" : sample_table})
+        ])
+    else:
+        import_text = mo.md("## ✅ Import Sample Concentrations")
 
-    {mo.accordion({"🔍︎ Example Sample Concentration File" : sample_table})}
-    """)
+    import_text
     return
 
 
 @app.cell
-def _(file_import, io, mo, pd, sampleheaders, samples_import):
+def _(io, mo, pd, sampleheaders, samples_import):
     mo.stop(
         not samples_import.value,
         mo.md("/// admonition| Sample file required\n\nCannot proceed until the file is uploaded\n///")
@@ -128,6 +136,8 @@ def _(file_import, io, mo, pd, sampleheaders, samples_import):
 
     try:
         sampdf = pd.read_csv(io.BytesIO(samples_import.value[0].contents), header= 0 if sampleheaders.value else None)
+        sampdf.dropna(how='all', axis=1, inplace=True)
+        sampdf.columns = sampdf.columns.map(str)
         sampdf.columns = [i.lower() for i in sampdf.columns]
     except Exception:
         is_err = True
@@ -140,19 +150,29 @@ def _(file_import, io, mo, pd, sampleheaders, samples_import):
         """)
         mo.stop(
             is_err,
-            mo.vstack([err_md, mo.md(f"```\n{file_import.value[0].contents[:200]}\n```")])
+            mo.vstack([err_md, mo.md(f"```\n{samples_import.value[0].contents[:200]}\n```")])
         )
     return (sampdf,)
 
 
 @app.cell
 def _(example_table, file_import, mo):
-    mo.vstack([
-         mo.md(f"""## {'▷' if not file_import.value else '✅'} Import Smear Analysis\nUsing the left sidebar, import the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which fragment size interval you are interested in performing a scaled concentration correction on."""),
-        mo.accordion({
+    smearnotes = {
         "🔍︎ Example Fragment Analyzer CSV File": example_table,
-        "⚠️ Notes and Considerations" : mo.md("**First row skipped**: Be aware that the first interval (sorted alphanumerically) of each sample, usually 10bp-100bp, is skipped in the calculations below.\n\n**Singletons skipped**: Rows with a `Sample ID` that only appears once are removed (e.g. a ladder, samples from a different run).\n\n**Consistency**: The target range is expected to be consistent across all samples.")})
-    ])
+        "⚠️ Notes and Considerations" : mo.md("**First row skipped**: Be aware that the first interval (sorted alphanumerically) of each sample, usually 10bp-100bp, is skipped in the calculations below.\n\n**Singletons skipped**: Rows with a `Sample ID` that only appears once are removed (e.g. a ladder, samples from a different run).\n\n**Consistency**: The target range is expected to be consistent across all samples.")}
+
+    if not file_import.value:
+        smeartext = mo.vstack([
+         mo.md(f"""## ▷ Import Smear Analysis\nUsing the left sidebar, import the CSV file that was provided to you by the BRC from the fragment analyzer. Then, choose which fragment size interval you are interested in performing a scaled concentration correction on."""),
+            mo.accordion(smearnotes)
+        ])
+    else:
+        del smearnotes["🔍︎ Example Fragment Analyzer CSV File"]
+        smeartext = mo.vstack([
+            mo.md("## ✅ Import Smear Analysis"),
+            mo.accordion(smearnotes)
+        ])
+    smeartext
     return
 
 
@@ -164,6 +184,7 @@ def _(file_import, io, mo, pd):
     )
 
     df = pd.read_csv(io.BytesIO(file_import.value[0].contents))
+    df.dropna(how='all', axis=1, inplace=True)
     df.rename(columns = {'ng/uL' : 'ng/µL'}, inplace = True)
     df = df[df['Sample ID'].duplicated(keep=False)]
     mo.stop(
@@ -302,12 +323,6 @@ def _(id_err, imports_finished, mo):
 
 
 @app.cell
-def _(x_seq):
-    min(x_seq)
-    return
-
-
-@app.cell
 def _(
     LinearRegression,
     calc_table,
@@ -322,37 +337,47 @@ def _(
     predict_table = calc_table[calc_table["Sample ng/µL"] >= 0.2]
 
     x = np.log(predict_table["Sample ng/µL"].values).reshape(-1, 1)
-    linear_x = predict_table["Sample ng/µL"].values.reshape(-1, 1)
+    x_linear = predict_table["Sample ng/µL"].values.reshape(-1, 1)
     y = predict_table["Corrected ng/µL"].values
     nMy = predict_table["Est. nM"].values
     Sizey = predict_table["Avg.Size"].values
 
     fit = LinearRegression().fit(x, y)
+    fitlinear = LinearRegression().fit(x_linear, y)
+
     Molarityfit = LinearRegression().fit(x, nMy)
+    Molarityfitlinear = LinearRegression().fit(x_linear, nMy)
+
     Sizefit = LinearRegression().fit(x, Sizey)
+    Sizefitlinear = LinearRegression().fit(x_linear, Sizey)
 
     # Predict
     x_seq = quants_df['concentration (ng/µL)'].values
 
-    concidentity_pred = x.flatten()
-    concss_res = np.sum((y - concidentity_pred) ** 2)
-    concss_tot = np.sum((y - np.mean(y)) ** 2)
-    concidentity_r2 = 1 - concss_res / concss_tot
-
-
     y_pred = fit.predict(np.log(x_seq).reshape(-1, 1))
-    rsq = f"Log R² = {fit.score(x, y):.3f} | 1:1 Linear R² = {concidentity_r2:.3f}"
-
-    identity_pred = linear_x.flatten()
-    ss_res = np.sum((nMy - identity_pred) ** 2)
-    ss_tot = np.sum((nMy - np.mean(nMy)) ** 2)
-    identity_r2 = 1 - ss_res / ss_tot
+    y_pred_linear = fitlinear.predict(x_seq.reshape(-1, 1))
+    rsq = f"Log R² = {fit.score(x, y):.3f} | Linear R² = {fitlinear.score(x_linear, y):.3f}"
 
     nMy_pred = Molarityfit.predict(np.log(x_seq).reshape(-1, 1))
-    nM_rsq = f"Log R² = {Molarityfit.score(x, nMy):.3f} | 1:1 Linear R² = {identity_r2:.3f}"
+    nMy_pred_linear = Molarityfitlinear.predict(x_seq.reshape(-1, 1))
+    nM_rsq = f"Log R² = {Molarityfit.score(x, nMy):.3f} | Linear R² = {Molarityfitlinear.score(x_linear, nMy):.3f}"
 
     size_pred = Sizefit.predict(np.log(x_seq).reshape(-1, 1))
-    return nM_rsq, nMy_pred, rsq, size_pred, x_seq, y_pred
+    size_pred_linear = Sizefitlinear.predict(x_seq.reshape(-1, 1))
+    size_rsq = f"Log R² = {Sizefit.score(x, Sizey):.3f} | Linear R² = {Sizefitlinear.score(x_linear, Sizey):.3f}"
+
+    return (
+        nM_rsq,
+        nMy_pred,
+        nMy_pred_linear,
+        rsq,
+        size_pred,
+        size_pred_linear,
+        size_rsq,
+        x_seq,
+        y_pred,
+        y_pred_linear,
+    )
 
 
 @app.cell
@@ -363,20 +388,25 @@ def _(
     mo,
     nM_rsq,
     nMy_pred,
+    nMy_pred_linear,
     plt,
     rsq,
+    size_pred,
+    size_pred_linear,
+    size_rsq,
     x_seq,
     y_pred,
+    y_pred_linear,
 ):
     mo.stop(imports_finished or id_err)
 
-    fig, axes = plt.subplots(2,1,sharex=True, figsize=(10, 7))
+    fig, axes = plt.subplots(3,1,sharex=True, figsize=(11, 7))
 
     # Plot on the first axes
     axes[0].set_title(f"Concentration ({rsq})")
-    axes[0].scatter(calc_table["Sample ng/µL"], calc_table["Corrected ng/µL"], color="black", label="Frag Data")
-    axes[0].scatter(x_seq, y_pred, facecolors='none', edgecolors='dodgerblue', label="Modeled Libraries")
-    axes[0].axline((0,0), slope=1, color = 'indianred', dashes = (1, 2, 1, 2))
+    axes[0].scatter(calc_table["Sample ng/µL"], calc_table["Corrected ng/µL"], color="black", label="Smear Data")
+    axes[0].scatter(x_seq, y_pred, facecolors='none', edgecolors='dodgerblue', marker='.', label="Log Model")
+    axes[0].scatter(x_seq, y_pred_linear, facecolors='lightsteelblue', marker='.', edgecolors=None, label="Linear Model")
     axes[0].set_xlabel("Sample ng/µL")
     axes[0].set_ylabel("Smear-Corrected ng/µL")
     axes[0].set_ylim(0, None)
@@ -384,13 +414,23 @@ def _(
 
     # Plot on the second axes
     axes[1].set_title(f"Molarity ({nM_rsq})")
-    axes[1].scatter(calc_table["Sample ng/µL"], calc_table["Est. nM"], color="black", label="Frag Data")
-    axes[1].scatter(x_seq, nMy_pred, facecolors='none', edgecolors='darkseagreen', label="Modeled Libraries")
-    axes[1].axline((0,0), slope=1, color = 'indianred', dashes = (1, 2, 1, 2))
+    axes[1].scatter(calc_table["Sample ng/µL"], calc_table["Est. nM"], color="black", label="Smear Data")
+    axes[1].scatter(x_seq, nMy_pred, facecolors='none', edgecolors='darkseagreen', marker='.', label="Log Model")
+    axes[1].scatter(x_seq, nMy_pred_linear, facecolors='lightsteelblue', edgecolors=None, marker='.', label="Linear Model")
     axes[1].set_xlabel("Sample ng/µL")
     axes[1].set_ylabel("Estimated nM")
     axes[1].set_ylim(0, None)
     axes[1].legend()
+
+    # Plot on the third axes
+    axes[2].set_title(f"Average Fragment Size ({size_rsq})")
+    axes[2].scatter(calc_table["Sample ng/µL"], calc_table["Avg.Size"], color="black", label="Smear Data")
+    axes[2].scatter(x_seq, size_pred, facecolors='none', edgecolors='#009999', marker='.', label="Log Model")
+    axes[2].scatter(x_seq, size_pred_linear, facecolors='#99d6d6', edgecolors=None, marker='.', label="Linear Model")
+    axes[2].set_xlabel("Sample ng/µL")
+    axes[2].set_ylabel("Average Fragment Length")
+    axes[2].set_ylim(0, None)
+    axes[2].legend()
 
     # 4. Use tight_layout to prevent label overlap
     plt.tight_layout()
@@ -399,7 +439,25 @@ def _(
 
 
 @app.cell
-def _(nMy_pred, pd, quants_df, size_pred, x_seq, y_pred):
+def _(LogorLinear, id_err, imports_finished, mo):
+    mo.stop(imports_finished or id_err)
+    LogorLinear
+    return
+
+
+@app.cell
+def _(
+    LogorLinear,
+    nMy_pred,
+    nMy_pred_linear,
+    pd,
+    quants_df,
+    size_pred,
+    size_pred_linear,
+    x_seq,
+    y_pred,
+    y_pred_linear,
+):
     def warn_cell(row_id, column_name, value):
         # row_id is a string index; look up the target column value for this row
         try:
@@ -413,15 +471,18 @@ def _(nMy_pred, pd, quants_df, size_pred, x_seq, y_pred):
             pass
         return {}
 
+    islog = LogorLinear.value == "Log Model"
+
     frag_scaled_concs = pd.DataFrame(
             {
                 "Sample" : quants_df['Sample ID'].values,
                 "Quant ng/µL": x_seq,
-                "Frag-Corrected ng/µL" : y_pred.round(2),
-                "Average Fragment Size": size_pred.round(),
-                "Estimated nM" : nMy_pred.round(2)
+                "Frag-Corrected ng/µL" : y_pred.round(2) if islog else y_pred_linear.round(2),
+                "Average Fragment Size": size_pred.round() if islog else size_pred_linear.round(),
+                "Estimated nM" : nMy_pred.round(2) if islog else nMy_pred_linear.round(2)
             }
         )
+
     return frag_scaled_concs, warn_cell
 
 
