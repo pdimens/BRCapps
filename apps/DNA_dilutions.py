@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.23.4"
 app = marimo.App(width="full", app_title="DNA Dilution Calculator")
 
 
@@ -73,7 +73,7 @@ def _(mo):
 
 
 @app.cell
-def _(copy, df, modf, pd, start_ul, target_ng, target_ul):
+def _(copy, modf, pd, start_ul, target_ng, target_ul):
     # define functions
     def parse_well(well):
         '''Function to parse well notation (handles both A1 and A01 as column 1)'''
@@ -83,20 +83,20 @@ def _(copy, df, modf, pd, start_ul, target_ng, target_ul):
 
     def style_cell(rowId, columnName, value):
         '''Only style cells in the diluent column where value < 0'''
-        if columnName == 'diluent (ul)':
+        if columnName == 'total volume (ul)':
             if value < 0:
                 return {
                     "backgroundColor": "lightcoral",
                     "color": "darkred",
                     "fontWeight": "bold"
                 }
-            elif  value > (190 - start_ul.value):
+            elif  value > 190:
                 return {
                     "backgroundColor": "black",
                     "color": "white",
                     "fontWeight": "bold"
                 }
-            elif (value + start_ul.value) < target_ul.value:
+            elif value < target_ul.value:
                 return {
                     "backgroundColor": "orange",
                     "color": "brown",
@@ -136,8 +136,8 @@ def _(copy, df, modf, pd, start_ul, target_ng, target_ul):
         '''convert long-form table into 96-well plate format dataframe'''
         df_copy = copy.copy(input_table)
         # Extract row and column from well notation
-        df_copy['row'] = df['well'].apply(lambda x: parse_well(x)[0])
-        df_copy['col'] = df['well'].apply(lambda x: parse_well(x)[1])
+        df_copy['row'] = input_table['well'].apply(lambda x: parse_well(x)[0])
+        df_copy['col'] = input_table['well'].apply(lambda x: parse_well(x)[1])
 
         # Create the transposed table
         plate_layout = df_copy.pivot(index='row', columns='col', values='diluent (ul)')
