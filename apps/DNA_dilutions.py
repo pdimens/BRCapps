@@ -34,25 +34,24 @@ def _(mo):
         step = 0.1,
         include_input = True,
         full_width = True,
-        label = "Input volume (ul) of stock DNA"
+        label = "Minimum input volume (ul) of stock DNA"
     )
 
     target_ng = mo.ui.slider(
         value = 0.3,
         start = 0.1,
         stop = 10,
-        step = 0.1,
+        step = 0.05,
         include_input = True,
         full_width = True,
         label = "Target concentration (ng/ul) of DNA"
     )
 
-    target_ul = mo.ui.slider(
+    target_ul = mo.ui.number(
         value = 5,
         start = 1,
-        stop = 20,
+        stop = 100,
         step = 0.1,
-        include_input = True,
         full_width = True,
         label = "Min. required ul of diluted DNA"
     )
@@ -104,29 +103,6 @@ def _(copy, modf, pd, start_ul, target_ng, target_ul):
                 }
         return {}
 
-    def style_well(rowId, columnName, value):
-        '''Only style cells where value is <0 or >190'''
-        if columnName != 'row':
-            if value < 0:
-                return {
-                    "backgroundColor": "lightcoral",
-                    "color": "darkred",
-                    "fontWeight": "bold"
-                }
-            elif  value > (190 - start_ul.value):
-                return {
-                    "backgroundColor": "black",
-                    "color": "white",
-                    "fontWeight": "bold"
-                }
-            elif (value + start_ul.value) < target_ul.value:
-                return {
-                    "backgroundColor": "orange",
-                    "color": "brown",
-                    "fontWeight": "bold"
-                }
-        return {}
-
     def recalc_dilution(updated_df):
         '''callback function for editable dataframe'''
         updated_df['diluent (ul)'] = round(((updated_df['ng/ul'] * updated_df['ul DNA']) / target_ng.value) - updated_df['ul DNA'], 2)
@@ -159,13 +135,22 @@ def _(copy, modf, pd, start_ul, target_ng, target_ul):
         _b = round(b, 1) if b > 0 else 0
         return [int(a), _b]
 
-    return (
-        mantis_round,
-        recalc_dilution,
-        style_cell,
-        style_well,
-        table_to_plate,
-    )
+    def adjust_to_target(df, target_ul):
+        df_result = df.copy()
+    
+        for idx, row in df_result.iterrows():
+            if row["ng/ul"] <= target_ng.value:
+                # Can't dilute up to target concentration, skip
+                continue
+            while row["total volume (ul)"] < target_ul:
+                row["ul DNA"] += 1
+                row["diluent (ul)"] = round(((row["ng/ul"] * row["ul DNA"]) / target_ng.value) - row["ul DNA"], 1)
+                row["total volume (ul)"] = row["ul DNA"] + row["diluent (ul)"]
+            df_result.loc[idx] = row
+    
+        return df_result
+
+    return mantis_round, recalc_dilution, style_cell, table_to_plate
 
 
 @app.cell
@@ -239,7 +224,7 @@ def _(example_file, file_import, headers, io, mo, pd):
 
 
 @app.cell
-def _(colnames, df, mo, start_ul, target_ng):
+def _(colnames, df, mo, start_ul, target_ng, target_ul):
     mo.stop(
         any([not i.value for i in colnames]),
         mo.md(f"""
@@ -254,6 +239,16 @@ def _(colnames, df, mo, start_ul, target_ng):
     df_clean['ul DNA'] = start_ul.value
     df_clean['diluent (ul)'] = round(((df_clean['ng/ul'] * df_clean['ul DNA']) / target_ng.value) - df_clean['ul DNA'], 1)
     df_clean['total volume (ul)'] = round(df_clean['diluent (ul)'] + start_ul.value, 1)
+    for idx, row in df_clean.iterrows():
+        if row["ng/ul"] <= target_ng.value:
+            # Can't dilute up to target concentration, skip
+            continue
+        while row["total volume (ul)"] < target_ul.value:
+            row["ul DNA"] += 1
+            row["diluent (ul)"] = round(((row["ng/ul"] * row["ul DNA"]) / target_ng.value) - row["ul DNA"], 1)
+            row["total volume (ul)"] = row["ul DNA"] + row["diluent (ul)"]
+        df_clean.loc[idx] = row
+
     return (df_clean,)
 
 
@@ -288,6 +283,30 @@ def _(editor, mo, style_cell):
 
 
 @app.cell
+def _(editor, target_ul):
+    def style_well(rowId, columnName, value):
+        all_rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+        row_letter = all_rows[int(rowId)]
+        well_id = f"{row_letter}{int(columnName):02d}"
+
+        original_row = editor.value[editor.value['well'] == well_id]
+
+        if original_row.empty:
+            return {}
+
+        if value < 0:
+            return {"backgroundColor": "lightcoral", "color": "darkred", "fontWeight": "bold"}
+        elif original_row.iloc[0]["total volume (ul)"] > 190:
+            return {"backgroundColor": "black", "color": "white", "fontWeight": "bold"}
+        elif original_row.iloc[0]["total volume (ul)"] < target_ul.value:
+            return {"backgroundColor": "orange", "color": "brown", "fontWeight": "bold"}
+
+        return {}
+
+    return (style_well,)
+
+
+@app.cell
 def _(colnames, file_import, mo, target_ng, target_ul):
     mo.stop(not file_import.value or (any([not i.value for i in colnames])))
     mo.md(fr"""
@@ -297,21 +316,6 @@ def _(colnames, file_import, mo, target_ng, target_ul):
     - <strong style="background-color:black;color:white;">Black</strong> highlighted wells have a final volume greater than **190ul**, which would be the maximum volume a standard 96-well microplate can hold without issues
     """)
     return
-
-
-@app.cell
-def _(editor, mo, start_ul, style_well, table_to_plate):
-    plate_fmt = mo.ui.table(
-        table_to_plate(editor.value),
-        show_data_types=False,
-        selection = None,
-        pagination = False,
-        show_column_summaries=False,
-        show_download = True,
-        style_cell = style_well,
-        label = f"Microliters (**ul**) of diluent to add to **{start_ul.value}ul** of DNA (unless manually modified)"
-    )
-    return (plate_fmt,)
 
 
 @app.cell
@@ -370,7 +374,18 @@ def _(mantis_round, mo, np, pd):
 
 
 @app.cell
-def _(download_mantis, mo, output_table, plate_fmt):
+def _(download_mantis, mo, output_table, style_well, table_to_plate):
+    plate_fmt = mo.ui.table(
+        table_to_plate(output_table.data),
+        show_data_types=False,
+        selection = None,
+        pagination = False,
+        show_column_summaries=False,
+        show_download = True,
+        style_cell = style_well,
+        label = f"Microliters (**ul**) of diluent to add to `_`ul DNA, where `_` is given by the number of microliters of DNA required to achieve minimum volume (see `Table View` tab)."
+    )
+
     mantis_dl = mo.vstack([
         download_mantis(plate_fmt.data),
         mo.md("Use the button above to download the dilution plate as a Mantis configuration file. The configuration sets up a series of steps for the high-volume chip to dispense the diluent up to the integer value of the volume (e.g. `40` of `40.1` ul). The high volume step will be separated into smaller steps to make sure the total dispensed volume does not exceed 850ul so that the diluent can be topped off and proceed to the next series of wells. The final step uses the low-volume chip to dispense the diluent for the remaining <1ul volume (e.g. `0.1` of `40.1` ul). Negative values and values with total expected volumes > `190` will be replaced with `0`.")
