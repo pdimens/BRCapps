@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.4"
+__generated_with = "0.23.8"
 app = marimo.App(width="full", app_title="DNA Dilution Calculator")
 
 
@@ -108,7 +108,7 @@ def _(copy, modf, pd, start_ul, target_ng, target_ul):
         updated_df['diluent (ul)'] = round(((updated_df['ng/ul'] * updated_df['ul DNA']) / target_ng.value) - updated_df['ul DNA'], 2)
         updated_df['total volume (ul)'] = round(updated_df['diluent (ul)'] + updated_df['ul DNA'], 1)
 
-    def table_to_plate(input_table) -> pd.DataFrame:
+    def table_to_plate(input_table, fillcol = 'diluent (ul)') -> pd.DataFrame:
         '''convert long-form table into 96-well plate format dataframe'''
         df_copy = copy.copy(input_table)
         # Extract row and column from well notation
@@ -116,7 +116,7 @@ def _(copy, modf, pd, start_ul, target_ng, target_ul):
         df_copy['col'] = input_table['well'].apply(lambda x: parse_well(x)[1])
 
         # Create the transposed table
-        plate_layout = df_copy.pivot(index='row', columns='col', values='diluent (ul)')
+        plate_layout = df_copy.pivot(index='row', columns='col', values=fillcol)
 
         # Ensure all rows A-H and columns 1-12 exist (fill missing with 0)
         all_rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
@@ -137,7 +137,7 @@ def _(copy, modf, pd, start_ul, target_ng, target_ul):
 
     def adjust_to_target(df, target_ul):
         df_result = df.copy()
-    
+
         for idx, row in df_result.iterrows():
             if row["ng/ul"] <= target_ng.value:
                 # Can't dilute up to target concentration, skip
@@ -147,7 +147,7 @@ def _(copy, modf, pd, start_ul, target_ng, target_ul):
                 row["diluent (ul)"] = round(((row["ng/ul"] * row["ul DNA"]) / target_ng.value) - row["ul DNA"], 1)
                 row["total volume (ul)"] = row["ul DNA"] + row["diluent (ul)"]
             df_result.loc[idx] = row
-    
+
         return df_result
 
     return mantis_round, recalc_dilution, style_cell, table_to_plate
@@ -158,7 +158,7 @@ def _(file_import, headers, mo, start_ul, target_ng, target_ul):
     mo.sidebar(
         [
             mo.md(
-                '# DNA Dilutions Calculator'
+                '# DNA Dilution Calculator'
                 '\nThis worksheet takes your DNA concentrations and formats the water volumes for a dilution plate.'
             ),
             file_import,
@@ -218,7 +218,11 @@ def _(example_file, file_import, headers, io, mo, pd):
     mo.vstack([
         mo.md("Please select the columns in your input file to map as well, sample ID, and concentration columns"),
         mo.ui.table(df.head(3), selection = None, show_column_summaries=False, show_data_types=False, show_download = False),
-        mo.hstack(colnames)
+        mo.hstack([
+            mo.md("""Use the slider on the left to set a fixed input volume or the table editor in the dropdown below to modify the input DNA volume  per sample. The changes will be reflected in the final output tables.
+    """),
+            mo.vstack(colnames, align = "end"),
+        ], widths = [1,1])
     ])
     return colnames, df
 
@@ -248,23 +252,15 @@ def _(colnames, df, mo, start_ul, target_ng, target_ul):
             row["diluent (ul)"] = round(((row["ng/ul"] * row["ul DNA"]) / target_ng.value) - row["ul DNA"], 1)
             row["total volume (ul)"] = row["ul DNA"] + row["diluent (ul)"]
         df_clean.loc[idx] = row
-
     return (df_clean,)
 
 
 @app.cell
 def _(colnames, df_clean, file_import, mo, recalc_dilution):
     mo.stop(not file_import.value or (any([not i.value for i in colnames])))
-    input_text = mo.md(r"""
-    ## Input Volume
-    Use the slider on the left to set a fixed input volume or the table editor in the dropdown below to modify the input DNA volume  per sample. The changes will be reflected in the final output tables.
-    """)
 
     editor = mo.ui.data_editor(df_clean, editable_columns=['ul DNA'], on_change=recalc_dilution)
-    mo.vstack([
-        input_text,
-        mo.accordion({"Variable Volumes" : editor})
-    ])
+    mo.accordion({"Variable Volumes" : editor})
     return (editor,)
 
 
@@ -343,7 +339,7 @@ def _(mantis_round, mo, np, pd):
             high_vec += high_chip  
             res_low  += "\t".join(low_chip) + "\r\n"
         track_vol = 0
-        cutoff = 850
+        cutoff = 900
         allwells = [0] * 96
         for i,well_vol in enumerate(high_vec):
             track_vol += well_vol
@@ -375,7 +371,7 @@ def _(mantis_round, mo, np, pd):
 
 @app.cell
 def _(download_mantis, mo, output_table, style_well, table_to_plate):
-    plate_fmt = mo.ui.table(
+    plate_fmt_diluent = mo.ui.table(
         table_to_plate(output_table.data),
         show_data_types=False,
         selection = None,
@@ -386,13 +382,24 @@ def _(download_mantis, mo, output_table, style_well, table_to_plate):
         label = f"Microliters (**ul**) of diluent to add to `_`ul DNA, where `_` is given by the number of microliters of DNA required to achieve minimum volume (see `Table View` tab)."
     )
 
+    plate_fmt_dna = mo.ui.table(
+        table_to_plate(output_table.data, fillcol="ul DNA"),
+        show_data_types=False,
+        selection = None,
+        pagination = False,
+        show_column_summaries=False,
+        show_download = True,
+        label = f"Microliters (**ul**) of DNA to add"
+    )
+
     mantis_dl = mo.vstack([
-        download_mantis(plate_fmt.data),
-        mo.md("Use the button above to download the dilution plate as a Mantis configuration file. The configuration sets up a series of steps for the high-volume chip to dispense the diluent up to the integer value of the volume (e.g. `40` of `40.1` ul). The high volume step will be separated into smaller steps to make sure the total dispensed volume does not exceed 850ul so that the diluent can be topped off and proceed to the next series of wells. The final step uses the low-volume chip to dispense the diluent for the remaining <1ul volume (e.g. `0.1` of `40.1` ul). Negative values and values with total expected volumes > `190` will be replaced with `0`.")
+        download_mantis(plate_fmt_diluent.data),
+        mo.md("Use the button above to download the dilution plate as a Mantis configuration file. The configuration sets up a series of steps for the high-volume chip to dispense the diluent up to the integer value of the volume (e.g. `40` of `40.1` ul). The high volume step will be separated into smaller steps to make sure the total dispensed volume does not exceed 900ul so that the diluent can be topped off and proceed to the next series of wells. The final step uses the low-volume chip to dispense the diluent for the remaining <1ul volume (e.g. `0.1` of `40.1` ul). Negative values and values with total expected volumes > `190` will be replaced with `0`.")
     ])
 
     mo.ui.tabs(
-        {"Plate View": mo.vstack([plate_fmt, mantis_dl]), 
+        {"ul Diluent": mo.vstack([plate_fmt_diluent, mantis_dl]), 
+         "ul DNA": plate_fmt_dna,
          "Table View": output_table
         },
         label = "Dilution Values", lazy = True
