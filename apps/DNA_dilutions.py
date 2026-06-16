@@ -101,12 +101,38 @@ def _(copy, modf, pd, start_ul, target_ng, target_ul):
                     "color": "brown",
                     "fontWeight": "bold"
                 }
+        if columnName == "diluent (ul)":
+            if value < 0:
+                return {
+                    "backgroundColor": "lightcoral",
+                    "color": "darkred",
+                    "fontWeight": "bold"
+                }
+            elif  value > 190:
+                return {
+                    "backgroundColor": "black",
+                    "color": "white",
+                    "fontWeight": "bold"
+                }
+        if columnName == "final conc":
+            if value < target_ng.value:
+                return {
+                    "backgroundColor": "lightcoral",
+                    "color": "darkred",
+                    "fontWeight": "bold"
+                }
+            elif  value > target_ng.value:
+                return {
+                    "backgroundColor": "black",
+                    "color": "white",
+                    "fontWeight": "bold"
+                }
         return {}
 
     def recalc_dilution(updated_df):
         '''callback function for editable dataframe'''
         updated_df['diluent (ul)'] = round(((updated_df['ng/ul'] * updated_df['ul DNA']) / target_ng.value) - updated_df['ul DNA'], 2)
-        updated_df['total volume (ul)'] = round(updated_df['diluent (ul)'] + updated_df['ul DNA'], 1)
+        updated_df['total volume (ul)'] = round(updated_df['diluent (ul)'].clip(lower = 0) + updated_df['ul DNA'], 1)
 
     def table_to_plate(input_table, fillcol = 'diluent (ul)') -> pd.DataFrame:
         '''convert long-form table into 96-well plate format dataframe'''
@@ -219,9 +245,9 @@ def _(example_file, file_import, headers, io, mo, pd):
         mo.md("Please select the columns in your input file to map as well, sample ID, and concentration columns"),
         mo.ui.table(df.head(3), selection = None, show_column_summaries=False, show_data_types=False, show_download = False),
         mo.hstack([
+            mo.vstack(colnames, align = "start"),
             mo.md("""Use the slider on the left to set a fixed input volume or the table editor in the dropdown below to modify the input DNA volume  per sample. The changes will be reflected in the final output tables.
     """),
-            mo.vstack(colnames, align = "end"),
         ], widths = [1,1])
     ])
     return colnames, df
@@ -242,7 +268,8 @@ def _(colnames, df, mo, start_ul, target_ng, target_ul):
     df_clean.columns = ['well', 'sample', 'ng/ul']
     df_clean['ul DNA'] = start_ul.value
     df_clean['diluent (ul)'] = round(((df_clean['ng/ul'] * df_clean['ul DNA']) / target_ng.value) - df_clean['ul DNA'], 1)
-    df_clean['total volume (ul)'] = round(df_clean['diluent (ul)'] + start_ul.value, 1)
+    df_clean['final conc'] = 0.0
+    df_clean['total volume (ul)'] = round(df_clean['diluent (ul)'].clip(lower=0) + start_ul.value, 1)
     for idx, row in df_clean.iterrows():
         if row["ng/ul"] <= target_ng.value:
             # Can't dilute up to target concentration, skip
@@ -250,8 +277,9 @@ def _(colnames, df, mo, start_ul, target_ng, target_ul):
         while row["total volume (ul)"] < target_ul.value:
             row["ul DNA"] += 1
             row["diluent (ul)"] = round(((row["ng/ul"] * row["ul DNA"]) / target_ng.value) - row["ul DNA"], 1)
-            row["total volume (ul)"] = row["ul DNA"] + row["diluent (ul)"]
+            row["total volume (ul)"] = row["ul DNA"] + max(0, row["diluent (ul)"])
         df_clean.loc[idx] = row
+    df_clean['final conc'] = round((df_clean['ng/ul'] * df_clean['ul DNA']) / df_clean['total volume (ul)'], 1)
     return (df_clean,)
 
 
@@ -289,14 +317,12 @@ def _(editor, target_ul):
 
         if original_row.empty:
             return {}
-
         if value < 0:
             return {"backgroundColor": "lightcoral", "color": "darkred", "fontWeight": "bold"}
         elif original_row.iloc[0]["total volume (ul)"] > 190:
             return {"backgroundColor": "black", "color": "white", "fontWeight": "bold"}
         elif original_row.iloc[0]["total volume (ul)"] < target_ul.value:
             return {"backgroundColor": "orange", "color": "brown", "fontWeight": "bold"}
-
         return {}
 
     return (style_well,)
