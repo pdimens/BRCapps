@@ -74,7 +74,7 @@ def _(mo):
 @app.cell
 def _(copy, modf, pd, start_ul, target_ng, target_ul):
     # define functions
-    def parse_well(well):
+    def parse_well(well: str):
         '''Function to parse well notation (handles both A1 and A01 as column 1)'''
         row = well[0]  # First character is the row (A-H)
         col = str(int(well[1:]))  # Remaining characters are the column number
@@ -227,6 +227,7 @@ def _(example_file, file_import, headers, io, mo, pd):
     try:
         df = pd.read_table(io.BytesIO(file_import.value[0].contents), header= 0 if headers.value else None, engine='python', sep=None)
         df.columns = [i.lower() for i in df.columns]
+        df = df.dropna()
     except Exception:
         is_err = True
         err_md = mo.md(f"""
