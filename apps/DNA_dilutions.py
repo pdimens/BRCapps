@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.8"
+__generated_with = "0.23.14"
 app = marimo.App(width="full", app_title="DNA Dilution Calculator")
 
 
@@ -131,12 +131,13 @@ def _(copy, modf, pd, start_ul, target_ng, target_ul):
 
     def recalc_dilution(updated_df):
         '''callback function for editable dataframe'''
-        updated_df['diluent (ul)'] = round(((updated_df['ng/ul'] * updated_df['ul DNA']) / target_ng.value) - updated_df['ul DNA'], 2)
+        updated_df['diluent (ul)'] = round(((updated_df['ng/ul'] * updated_df['ul DNA']) / target_ng.value) - updated_df['ul DNA'], 2).clip(lower = 0)
         updated_df['total volume (ul)'] = round(updated_df['diluent (ul)'].clip(lower = 0) + updated_df['ul DNA'], 1)
 
     def table_to_plate(input_table, fillcol = 'diluent (ul)') -> pd.DataFrame:
         '''convert long-form table into 96-well plate format dataframe'''
         df_copy = copy.copy(input_table)
+        df_copy["diluent (ul)"] = df_copy["diluent (ul)"].clip(lower = 0)
         # Extract row and column from well notation
         df_copy['row'] = input_table['well'].apply(lambda x: parse_well(x)[0])
         df_copy['col'] = input_table['well'].apply(lambda x: parse_well(x)[1])
@@ -267,12 +268,29 @@ def _(colnames, df, mo, start_ul, target_ng, target_ul):
 
     df_clean = df[[i.value for i in colnames]]
     df_clean.columns = ['well', 'sample', 'ng/ul']
+    welldups = df_clean[df_clean.duplicated(subset = ['well'])]
+    sampledups = df_clean[df_clean.duplicated(subset = ['sample'])]
+
+    mo.stop(len(welldups) > 0,
+        mo.vstack([
+            mo.md("/// attention| Duplicate entries in well column, cannot continue\n\n///"),
+            mo.ui.table(welldups, show_data_types=False, pagination = False, show_column_summaries=False)
+        ])
+    )
+
+    mo.stop(len(sampledups) > 0,
+        mo.vstack([
+            mo.md("/// attention| Duplicate entries in sample column, cannot continue\n\n///"),
+            mo.ui.table(sampledups, show_data_types=False, pagination = False, show_column_summaries=False)
+      ])
+    )
+
     df_clean['ul DNA'] = start_ul.value
     df_clean['diluent (ul)'] = round(((df_clean['ng/ul'] * df_clean['ul DNA']) / target_ng.value) - df_clean['ul DNA'], 1)
     df_clean['final conc'] = 0.0
     df_clean['total volume (ul)'] = round(df_clean['diluent (ul)'].clip(lower=0) + start_ul.value, 1)
     for idx, row in df_clean.iterrows():
-        if row["ng/ul"] <= target_ng.value:
+        if row["ng/ul"] < target_ng.value:
             # Can't dilute up to target concentration, skip
             continue
         while row["total volume (ul)"] < target_ul.value:
@@ -406,7 +424,7 @@ def _(download_mantis, mo, output_table, style_well, table_to_plate):
         show_column_summaries=False,
         show_download = True,
         style_cell = style_well,
-        label = f"Microliters (**ul**) of diluent to add to `_`ul DNA, where `_` is given by the number of microliters of DNA required to achieve minimum volume (see `Table View` tab)."
+        label = f"Microliters (**ul**) of diluent to add to **X**ul DNA, where **X** is given by the number of microliters of DNA required to achieve minimum volume (see `Table View` tab)."
     )
 
     plate_fmt_dna = mo.ui.table(
