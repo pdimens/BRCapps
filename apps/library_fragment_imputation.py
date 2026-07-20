@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.14"
 app = marimo.App(width="medium", app_title="Fragment Analysis Library Pooling")
 
 
@@ -135,7 +135,7 @@ def _(io, mo, pd, sampleheaders, samples_import):
     )
 
     try:
-        sampdf = pd.read_csv(io.BytesIO(samples_import.value[0].contents), header= 0 if sampleheaders.value else None)
+        sampdf = pd.read_csv(io.BytesIO(samples_import.value[0].contents), engine = "python", sep = "\t|,", header= 0 if sampleheaders.value else None)
         sampdf.dropna(how='all', axis=1, inplace=True)
         sampdf.columns = sampdf.columns.map(str)
         sampdf.columns = [i.lower() for i in sampdf.columns]
@@ -365,7 +365,6 @@ def _(
     size_pred = Sizefit.predict(np.log(x_seq).reshape(-1, 1))
     size_pred_linear = Sizefitlinear.predict(x_seq.reshape(-1, 1))
     size_rsq = f"Log R² = {Sizefit.score(x, Sizey):.3f} | Linear R² = {Sizefitlinear.score(x_linear, Sizey):.3f}"
-
     return (
         nM_rsq,
         nMy_pred,
@@ -482,7 +481,6 @@ def _(
                 "Estimated nM" : nMy_pred.round(2) if islog else nMy_pred_linear.round(2)
             }
         )
-
     return frag_scaled_concs, warn_cell
 
 
